@@ -24,8 +24,9 @@
     <string name="cashbee">캐시비 (Cashbee)</string>
     <string name="hanpay">한페이 (Hanpay)</string>
     <string name="railplus">레일플러스 (Rail+)</string>
-    <string name="hipass">하이패스 (Hi-pass)</string>
-    <string name="hipass_not_supported">하이패스 카드는 5.8GHz DSRC 방식을 사용하여\nNFC로 조회할 수 없습니다.</string>
+    <string name="mpass">엠패스 (M Pass)</string>
+    <string name="seoul_city_pass">서울시티패스 (Seoul City Pass)</string>
+    <string name="korea_tour_card">코리아 투어 카드 (Korea Tour Card)</string>
     <string name="supported_cards">지원 카드</string>
-    <string name="card_list">• 티머니\n• 캐시비\n• 한페이\n• 레일플러스\n• 하이패스 (조회 불가 안내)</string>
+    <string name="card_list">• 티머니 (전국)\n• 캐시비 (전국)\n• 한페이 (전국)\n• 레일플러스 (철도)\n• 엠패스 (부산·경남)\n• 서울시티패스 (서울 관광)\n• 코리아 투어 카드 (외국인 관광)</string>
 </resources>

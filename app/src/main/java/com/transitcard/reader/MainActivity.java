@@ -164,11 +164,6 @@ public class MainActivity extends AppCompatActivity {
         } else {
             transactionHistoryCard.setVisibility(View.GONE);
         }
-
-        // Special handling for Hi-pass
-        if (cardData.getCardType() == CardType.HIPASS) {
-            Toast.makeText(this, R.string.hipass_not_supported, Toast.LENGTH_LONG).show();
-        }
     }
 
     private void displayTransactionHistory(java.util.List<Transaction> transactions) {

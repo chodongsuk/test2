@@ -54,6 +54,15 @@ public class NFCReader {
                 case RAILPLUS:
                     parser = new RailplusParser();
                     break;
+                case MPASS:
+                    parser = new MPassParser();
+                    break;
+                case SEOUL_CITY_PASS:
+                    parser = new SeoulCityPassParser();
+                    break;
+                case KOREA_TOUR_CARD:
+                    parser = new KoreaTourCardParser();
+                    break;
             }
 
             TransitCardData result = null;
@@ -106,18 +115,33 @@ public class NFCReader {
                 (byte) 0x03, (byte) 0x00, (byte) 0x02
         };
 
-        // Try T-money
+        byte[] railplusAID = new byte[]{
+                (byte) 0xD4, (byte) 0x10, (byte) 0x00, (byte) 0x00,
+                (byte) 0x03, (byte) 0x00, (byte) 0x03
+        };
+
+        byte[] mpassAID = new byte[]{
+                (byte) 0xD4, (byte) 0x10, (byte) 0x00, (byte) 0x00,
+                (byte) 0x03, (byte) 0x00, (byte) 0x04
+        };
+
+        // Try T-money (also used by Seoul City Pass and Korea Tour Card)
         try {
             byte[] response = selectAID(isoDep, tmoneyAID);
             if (response != null && response.length >= 2) {
                 int sw1 = response[response.length - 2] & 0xFF;
                 int sw2 = response[response.length - 1] & 0xFF;
                 if (sw1 == 0x90 && sw2 == 0x00) {
+                    // Check if it's Seoul City Pass or Korea Tour Card
+                    CardType specificType = detectTmoneyBasedCard(isoDep, cardId);
+                    if (specificType != CardType.UNKNOWN) {
+                        return specificType;
+                    }
                     return CardType.TMONEY;
                 }
             }
         } catch (Exception e) {
-            Log.d(TAG, "Not T-money");
+            Log.d(TAG, "Not T-money based");
         }
 
         // Try Cashbee
@@ -134,8 +158,45 @@ public class NFCReader {
             Log.d(TAG, "Not Cashbee");
         }
 
+        // Try Rail+
+        try {
+            byte[] response = selectAID(isoDep, railplusAID);
+            if (response != null && response.length >= 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    return CardType.RAILPLUS;
+                }
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "Not Rail+");
+        }
+
+        // Try M Pass
+        try {
+            byte[] response = selectAID(isoDep, mpassAID);
+            if (response != null && response.length >= 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    return CardType.MPASS;
+                }
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "Not M Pass");
+        }
+
         // Fallback to ID-based detection
         return detectCardTypeFromId(cardId);
+    }
+
+    private CardType detectTmoneyBasedCard(IsoDep isoDep, byte[] cardId) {
+        // Seoul City Pass and Korea Tour Card use T-money platform
+        // but have distinctive characteristics
+
+        // This would need actual card testing to implement proper detection
+        // For now, return UNKNOWN to default to TMONEY
+        return CardType.UNKNOWN;
     }
 
     private CardType detectCardTypeFromId(byte[] cardId) {

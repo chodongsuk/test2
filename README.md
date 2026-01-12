@@ -4,11 +4,18 @@
 
 ## 지원 카드
 
-- ✅ **티머니 (T-money)** - NFC 조회 가능
-- ✅ **캐시비 (Cashbee)** - NFC 조회 가능
-- ✅ **한페이 (Hanpay)** - NFC 조회 가능
-- ✅ **레일플러스 (Rail+)** - NFC 조회 가능
-- ⚠️ **하이패스 (Hi-pass)** - 5.8GHz DSRC 방식으로 NFC 조회 불가 (안내 메시지 표시)
+### 전국 호환 카드
+- ✅ **티머니 (T-money)** - 전국 교통카드, NFC 조회 가능
+- ✅ **캐시비 (Cashbee)** - FeliCa 기반, NFC 조회 가능
+- ✅ **한페이 (Hanpay)** - 후불 교통카드, NFC 조회 가능
+
+### 특수 목적 카드
+- ✅ **레일플러스 (Rail+)** - 철도 전용, NFC 조회 가능
+- ✅ **엠패스 (M Pass)** - 부산·김해·경남 지역, NFC 조회 가능
+
+### 관광객용 카드
+- ✅ **서울시티패스 (Seoul City Pass)** - 서울 관광 통합카드, NFC 조회 가능
+- ✅ **코리아 투어 카드 (Korea Tour Card)** - 외국인 관광객 전용, NFC 조회 가능
 
 ## 주요 기능
 
@@ -46,17 +53,20 @@
 
 ```
 app/src/main/java/com/transitcard/reader/
-├── MainActivity.java          # 메인 액티비티
-├── NFCReader.java             # NFC 리더 핵심 로직
-├── CardParser.java            # 카드 파서 인터페이스
-├── CardType.java              # 카드 종류 enum
-├── TransitCardData.java       # 교통카드 데이터 모델
-├── Transaction.java           # 거래 내역 모델
-├── TransactionType.java       # 거래 유형 enum
-├── TMoneyParser.java          # 티머니 파서
-├── CashbeeParser.java         # 캐시비 파서
-├── HanpayParser.java          # 한페이 파서
-└── RailplusParser.java        # 레일플러스 파서
+├── MainActivity.java              # 메인 액티비티
+├── NFCReader.java                 # NFC 리더 핵심 로직
+├── CardParser.java                # 카드 파서 인터페이스
+├── CardType.java                  # 카드 종류 enum
+├── TransitCardData.java           # 교통카드 데이터 모델
+├── Transaction.java               # 거래 내역 모델
+├── TransactionType.java           # 거래 유형 enum
+├── TMoneyParser.java              # 티머니 파서
+├── CashbeeParser.java             # 캐시비 파서
+├── HanpayParser.java              # 한페이 파서
+├── RailplusParser.java            # 레일플러스 파서
+├── MPassParser.java               # 엠패스 파서
+├── SeoulCityPassParser.java       # 서울시티패스 파서
+└── KoreaTourCardParser.java       # 코리아 투어 카드 파서
 ```
 
 ## 작동 원리
@@ -70,7 +80,8 @@ app/src/main/java/com/transitcard/reader/
 
 - NFC 기능이 있는 안드로이드 기기에서만 작동합니다
 - 일부 카드는 보안 정책으로 인해 상세 정보 조회가 제한될 수 있습니다
-- 하이패스 카드는 DSRC 방식을 사용하여 일반 NFC로는 조회할 수 없습니다
+- 교통카드별로 읽을 수 있는 정보의 범위가 다를 수 있습니다
+- 실제 카드 테스트를 통해 각 카드별 프로토콜을 최적화해야 정확한 정보를 읽을 수 있습니다
 
 ## 라이선스
 

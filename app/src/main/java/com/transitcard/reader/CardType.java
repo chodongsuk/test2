@@ -5,7 +5,9 @@ public enum CardType {
     CASHBEE("캐시비 (Cashbee)"),
     HANPAY("한페이 (Hanpay)"),
     RAILPLUS("레일플러스 (Rail+)"),
-    HIPASS("하이패스 (Hi-pass)"),
+    MPASS("엠패스 (M Pass)"),
+    SEOUL_CITY_PASS("서울시티패스 (Seoul City Pass)"),
+    KOREA_TOUR_CARD("코리아 투어 카드 (Korea Tour Card)"),
     UNKNOWN("알 수 없는 카드");
 
     private final String displayName;
