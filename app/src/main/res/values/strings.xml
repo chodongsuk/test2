@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">교통카드 조회</string>
+    <string name="main_title">교통카드 리더</string>
+    <string name="scan_instruction">카드를 스마트폰 뒷면에 가까이 대주세요</string>
+    <string name="scan_button">카드 스캔</string>
+    <string name="nfc_disabled">NFC가 비활성화되어 있습니다.\n설정에서 NFC를 활성화해주세요.</string>
+    <string name="nfc_not_supported">이 기기는 NFC를 지원하지 않습니다.</string>
+    <string name="reading_card">카드를 읽는 중...</string>
+    <string name="card_detected">카드 감지됨</string>
+    <string name="card_type">카드 종류</string>
+    <string name="card_number">카드 번호</string>
+    <string name="balance">잔액</string>
+    <string name="last_transaction">마지막 거래</string>
+    <string name="transaction_history">거래 내역</string>
+    <string name="date">날짜</string>
+    <string name="location">위치</string>
+    <string name="amount">금액</string>
+    <string name="balance_after">거래 후 잔액</string>
+    <string name="won">원</string>
+    <string name="error_reading_card">카드를 읽을 수 없습니다.</string>
+    <string name="unknown_card">알 수 없는 카드</string>
+    <string name="tmoney">티머니 (T-money)</string>
+    <string name="cashbee">캐시비 (Cashbee)</string>
+    <string name="hanpay">한페이 (Hanpay)</string>
+    <string name="railplus">레일플러스 (Rail+)</string>
+    <string name="hipass">하이패스 (Hi-pass)</string>
+    <string name="hipass_not_supported">하이패스 카드는 5.8GHz DSRC 방식을 사용하여\nNFC로 조회할 수 없습니다.</string>
+    <string name="supported_cards">지원 카드</string>
+    <string name="card_list">• 티머니\n• 캐시비\n• 한페이\n• 레일플러스\n• 하이패스 (조회 불가 안내)</string>
+</resources>
