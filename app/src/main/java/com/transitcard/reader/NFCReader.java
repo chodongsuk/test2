@@ -63,9 +63,6 @@ public class NFCReader {
                 case KOREA_TOUR_CARD:
                     parser = new KoreaTourCardParser();
                     break;
-                case EZL:
-                    parser = new EZLParser();
-                    break;
             }
 
             TransitCardData result = null;
@@ -128,11 +125,6 @@ public class NFCReader {
                 (byte) 0x03, (byte) 0x00, (byte) 0x04
         };
 
-        byte[] ezlAID = new byte[]{
-                (byte) 0xD4, (byte) 0x10, (byte) 0x00, (byte) 0x00,
-                (byte) 0x03, (byte) 0x00, (byte) 0x05
-        };
-
         // Try T-money (also used by Seoul City Pass and Korea Tour Card)
         try {
             byte[] response = selectAID(isoDep, tmoneyAID);
@@ -192,20 +184,6 @@ public class NFCReader {
             }
         } catch (Exception e) {
             Log.d(TAG, "Not M Pass");
-        }
-
-        // Try EZL
-        try {
-            byte[] response = selectAID(isoDep, ezlAID);
-            if (response != null && response.length >= 2) {
-                int sw1 = response[response.length - 2] & 0xFF;
-                int sw2 = response[response.length - 1] & 0xFF;
-                if (sw1 == 0x90 && sw2 == 0x00) {
-                    return CardType.EZL;
-                }
-            }
-        } catch (Exception e) {
-            Log.d(TAG, "Not EZL");
         }
 
         // Fallback to ID-based detection
