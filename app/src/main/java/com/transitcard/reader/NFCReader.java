@@ -2,6 +2,7 @@ package com.transitcard.reader;
 
 import android.nfc.Tag;
 import android.nfc.tech.IsoDep;
+import android.nfc.tech.MifareClassic;
 import android.nfc.tech.NfcA;
 import android.util.Log;
 
@@ -21,10 +22,23 @@ public class NFCReader {
             // Try IsoDep first (most common for Korean transit cards)
             IsoDep isoDep = IsoDep.get(tag);
             if (isoDep != null) {
-                Log.d(TAG, "✓ IsoDep supported - using IsoDep reader");
-                return readIsoDepCard(isoDep, id);
+                Log.d(TAG, "✓ IsoDep supported - trying IsoDep reader");
+                TransitCardData isoDepResult = readIsoDepCard(isoDep, id);
+                if (isoDepResult != null && isoDepResult.getCardType() != CardType.UNKNOWN) {
+                    return isoDepResult;
+                }
+                Log.d(TAG, "IsoDep reader failed or returned UNKNOWN - trying other technologies");
             } else {
                 Log.d(TAG, "✗ IsoDep NOT supported");
+            }
+
+            // Try MifareClassic (used by EZL/Cashbee and other cards)
+            MifareClassic mifareClassic = MifareClassic.get(tag);
+            if (mifareClassic != null) {
+                Log.d(TAG, "✓ MifareClassic supported - using MifareClassic reader");
+                return readMifareClassicCard(mifareClassic, id);
+            } else {
+                Log.d(TAG, "✗ MifareClassic NOT supported");
             }
 
             // Try NfcA
@@ -252,6 +266,114 @@ public class NFCReader {
         } catch (Exception e) {
             Log.e(TAG, "Error selecting AID", e);
             return null;
+        }
+    }
+
+    private TransitCardData readMifareClassicCard(MifareClassic mifareClassic, byte[] cardId) {
+        try {
+            mifareClassic.connect();
+            Log.d(TAG, "MifareClassic connected");
+
+            int sectorCount = mifareClassic.getSectorCount();
+            int blockCount = mifareClassic.getBlockCount();
+            Log.d(TAG, "Card has " + sectorCount + " sectors, " + blockCount + " blocks");
+
+            // Try to authenticate and read sectors to find balance
+            // Common keys for transit cards
+            byte[][] keys = {
+                MifareClassic.KEY_DEFAULT,
+                MifareClassic.KEY_MIFARE_APPLICATION_DIRECTORY,
+                new byte[]{(byte)0xFF, (byte)0xFF, (byte)0xFF, (byte)0xFF, (byte)0xFF, (byte)0xFF},
+                new byte[]{(byte)0xA0, (byte)0xA1, (byte)0xA2, (byte)0xA3, (byte)0xA4, (byte)0xA5},
+                new byte[]{(byte)0xD3, (byte)0xF7, (byte)0xD3, (byte)0xF7, (byte)0xD3, (byte)0xF7}
+            };
+
+            int balance = 0;
+            boolean balanceFound = false;
+
+            // Scan through sectors looking for balance data
+            for (int sectorIndex = 0; sectorIndex < Math.min(sectorCount, 16); sectorIndex++) {
+                boolean authenticated = false;
+
+                // Try each key
+                for (byte[] key : keys) {
+                    try {
+                        if (mifareClassic.authenticateSectorWithKeyA(sectorIndex, key)) {
+                            authenticated = true;
+                            Log.d(TAG, "✓ Sector " + sectorIndex + " authenticated with key A");
+                            break;
+                        }
+                    } catch (Exception e) {
+                        // Try next key
+                    }
+
+                    try {
+                        if (mifareClassic.authenticateSectorWithKeyB(sectorIndex, key)) {
+                            authenticated = true;
+                            Log.d(TAG, "✓ Sector " + sectorIndex + " authenticated with key B");
+                            break;
+                        }
+                    } catch (Exception e) {
+                        // Try next key
+                    }
+                }
+
+                if (authenticated) {
+                    // Read blocks in this sector
+                    int firstBlock = mifareClassic.sectorToBlock(sectorIndex);
+                    int blocksInSector = mifareClassic.getBlockCountInSector(sectorIndex);
+
+                    for (int blockOffset = 0; blockOffset < blocksInSector - 1; blockOffset++) {
+                        try {
+                            int blockIndex = firstBlock + blockOffset;
+                            byte[] blockData = mifareClassic.readBlock(blockIndex);
+                            Log.d(TAG, "Sector " + sectorIndex + " Block " + blockIndex + ": " + bytesToHex(blockData));
+
+                            // Look for balance pattern - typically 4 bytes
+                            // Balance is often stored as big-endian integer
+                            if (blockData != null && blockData.length >= 4) {
+                                // Check if this looks like a balance (non-zero, reasonable value)
+                                int possibleBalance = ((blockData[0] & 0xFF) << 24) |
+                                                     ((blockData[1] & 0xFF) << 16) |
+                                                     ((blockData[2] & 0xFF) << 8) |
+                                                     (blockData[3] & 0xFF);
+
+                                // Balance should be reasonable (0 to 500,000 won)
+                                if (possibleBalance > 0 && possibleBalance < 500000 && !balanceFound) {
+                                    balance = possibleBalance;
+                                    balanceFound = true;
+                                    Log.d(TAG, "✓ Found potential balance: " + balance + " won at sector " + sectorIndex + " block " + blockIndex);
+                                }
+                            }
+                        } catch (Exception e) {
+                            Log.d(TAG, "Could not read block " + (firstBlock + blockOffset) + ": " + e.getMessage());
+                        }
+                    }
+                } else {
+                    Log.d(TAG, "✗ Could not authenticate sector " + sectorIndex);
+                }
+            }
+
+            mifareClassic.close();
+
+            Log.d(TAG, "MifareClassic reading complete. Final balance: " + balance + " won");
+            return new TransitCardData(
+                    CardType.CASHBEE,
+                    bytesToHex(cardId),
+                    balance
+            );
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error reading MifareClassic card", e);
+            try {
+                mifareClassic.close();
+            } catch (Exception ignored) {
+            }
+            return new TransitCardData(
+                    CardType.CASHBEE,
+                    bytesToHex(cardId),
+                    0
+            );
         }
     }
 
