@@ -35,33 +35,9 @@ public class CashbeeParser implements CardParser {
 
     private int readBalance(IsoDep isoDep) {
         try {
-            Log.d(TAG, "Starting EZL/Cashbee balance read...");
+            Log.d(TAG, "Starting EZL/Cashbee balance read (AID already selected by NFCReader)...");
 
-            // Step 1: Select file (DF)
-            byte[] selectCommand = new byte[]{
-                    (byte) 0x00, (byte) 0xA4, (byte) 0x00, (byte) 0x00,
-                    (byte) 0x02, (byte) 0x42, (byte) 0x00
-            };
-            Log.d(TAG, "Sending select command: " + bytesToHex(selectCommand));
-            byte[] selectResponse = isoDep.transceive(selectCommand);
-            Log.d(TAG, "Select response: " + bytesToHex(selectResponse));
-
-            // Check if select was successful
-            if (selectResponse.length < 2) {
-                Log.e(TAG, "Select response too short: " + selectResponse.length);
-                return 0;
-            }
-
-            int selectSW1 = selectResponse[selectResponse.length - 2] & 0xFF;
-            int selectSW2 = selectResponse[selectResponse.length - 1] & 0xFF;
-            Log.d(TAG, "Select SW: " + Integer.toHexString(selectSW1) + " " + Integer.toHexString(selectSW2));
-
-            if (selectSW1 != 0x90 || selectSW2 != 0x00) {
-                Log.e(TAG, "File selection failed with SW: " + Integer.toHexString(selectSW1) + Integer.toHexString(selectSW2));
-                return 0;
-            }
-
-            // Step 2: Read balance
+            // AID is already selected by NFCReader, directly read balance
             byte[] balanceCommand = new byte[]{
                     (byte) 0x90, (byte) 0x4C, (byte) 0x00, (byte) 0x00,
                     (byte) 0x04
@@ -84,7 +60,7 @@ public class CashbeeParser implements CardParser {
                     Log.d(TAG, "Parsed balance: " + balance + " won");
                     return balance;
                 } else {
-                    Log.e(TAG, "Balance command failed");
+                    Log.e(TAG, "Balance command failed with SW: " + Integer.toHexString(sw1) + Integer.toHexString(sw2));
                 }
             } else {
                 Log.e(TAG, "Balance response too short: " + response.length);
