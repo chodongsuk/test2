@@ -11,20 +11,32 @@ public class NFCReader {
     public TransitCardData readCard(Tag tag) {
         try {
             byte[] id = tag.getId();
+            Log.d(TAG, "=== NFC Card Detected ===");
             Log.d(TAG, "Card ID: " + bytesToHex(id));
+
+            // Log available technologies
+            String[] techList = tag.getTechList();
+            Log.d(TAG, "Available technologies: " + java.util.Arrays.toString(techList));
 
             // Try IsoDep first (most common for Korean transit cards)
             IsoDep isoDep = IsoDep.get(tag);
             if (isoDep != null) {
+                Log.d(TAG, "✓ IsoDep supported - using IsoDep reader");
                 return readIsoDepCard(isoDep, id);
+            } else {
+                Log.d(TAG, "✗ IsoDep NOT supported");
             }
 
             // Try NfcA
             NfcA nfcA = NfcA.get(tag);
             if (nfcA != null) {
+                Log.d(TAG, "✓ NfcA supported - using NfcA reader");
                 return readNfcACard(nfcA, id);
+            } else {
+                Log.d(TAG, "✗ NfcA NOT supported");
             }
 
+            Log.e(TAG, "✗ No supported NFC technology found for this card");
             return null;
         } catch (Exception e) {
             Log.e(TAG, "Error reading card", e);
