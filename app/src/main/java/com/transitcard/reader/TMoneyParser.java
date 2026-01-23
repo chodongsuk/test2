@@ -39,18 +39,36 @@ public class TMoneyParser implements CardParser {
 
     private int readBalance(IsoDep isoDep) {
         try {
-            // Read balance from file
-            // Command: Read Record (File 04, Record 00)
-            byte[] command = new byte[]{
-                    (byte) 0x90, (byte) 0xB0, // CLA, INS
-                    (byte) 0x00, (byte) 0x00, // P1, P2
-                    (byte) 0x04                  // Le
+            // Step 1: Select file (DF)
+            byte[] selectCommand = new byte[]{
+                    (byte) 0x00, (byte) 0xA4, (byte) 0x00, (byte) 0x00,
+                    (byte) 0x02, (byte) 0x42, (byte) 0x00
             };
+            byte[] selectResponse = isoDep.transceive(selectCommand);
 
-            byte[] response = isoDep.transceive(command);
+            // Check if select was successful
+            if (selectResponse.length < 2 ||
+                selectResponse[selectResponse.length - 2] != (byte) 0x90 ||
+                selectResponse[selectResponse.length - 1] != (byte) 0x00) {
+                Log.e(TAG, "File selection failed");
+                return 0;
+            }
+
+            // Step 2: Read balance
+            byte[] balanceCommand = new byte[]{
+                    (byte) 0x90, (byte) 0x4C, (byte) 0x00, (byte) 0x00,
+                    (byte) 0x04
+            };
+            byte[] response = isoDep.transceive(balanceCommand);
+
             if (response.length >= 6) {
-                // Balance is typically stored in bytes 0-3 (little-endian)
-                return ByteBuffer.wrap(response, 0, 4).getInt();
+                // Balance is stored in first 4 bytes (big-endian)
+                // balance = balance[0] * 256^3 + balance[1] * 256^2 + balance[2] * 256 + balance[3]
+                int balance = ((response[0] & 0xFF) << 24) |
+                             ((response[1] & 0xFF) << 16) |
+                             ((response[2] & 0xFF) << 8) |
+                             (response[3] & 0xFF);
+                return balance;
             } else {
                 return 0;
             }
