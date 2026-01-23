@@ -35,18 +35,29 @@ public class CashbeeParser implements CardParser {
 
     private int readBalance(IsoDep isoDep) {
         try {
+            Log.d(TAG, "Starting EZL/Cashbee balance read...");
+
             // Step 1: Select file (DF)
             byte[] selectCommand = new byte[]{
                     (byte) 0x00, (byte) 0xA4, (byte) 0x00, (byte) 0x00,
                     (byte) 0x02, (byte) 0x42, (byte) 0x00
             };
+            Log.d(TAG, "Sending select command: " + bytesToHex(selectCommand));
             byte[] selectResponse = isoDep.transceive(selectCommand);
+            Log.d(TAG, "Select response: " + bytesToHex(selectResponse));
 
             // Check if select was successful
-            if (selectResponse.length < 2 ||
-                selectResponse[selectResponse.length - 2] != (byte) 0x90 ||
-                selectResponse[selectResponse.length - 1] != (byte) 0x00) {
-                Log.e(TAG, "File selection failed");
+            if (selectResponse.length < 2) {
+                Log.e(TAG, "Select response too short: " + selectResponse.length);
+                return 0;
+            }
+
+            int selectSW1 = selectResponse[selectResponse.length - 2] & 0xFF;
+            int selectSW2 = selectResponse[selectResponse.length - 1] & 0xFF;
+            Log.d(TAG, "Select SW: " + Integer.toHexString(selectSW1) + " " + Integer.toHexString(selectSW2));
+
+            if (selectSW1 != 0x90 || selectSW2 != 0x00) {
+                Log.e(TAG, "File selection failed with SW: " + Integer.toHexString(selectSW1) + Integer.toHexString(selectSW2));
                 return 0;
             }
 
@@ -55,19 +66,30 @@ public class CashbeeParser implements CardParser {
                     (byte) 0x90, (byte) 0x4C, (byte) 0x00, (byte) 0x00,
                     (byte) 0x04
             };
+            Log.d(TAG, "Sending balance command: " + bytesToHex(balanceCommand));
             byte[] response = isoDep.transceive(balanceCommand);
+            Log.d(TAG, "Balance response (" + response.length + " bytes): " + bytesToHex(response));
 
             if (response.length >= 6) {
-                // Balance is stored in first 4 bytes (big-endian)
-                // balance = balance[0] * 256^3 + balance[1] * 256^2 + balance[2] * 256 + balance[3]
-                int balance = ((response[0] & 0xFF) << 24) |
-                             ((response[1] & 0xFF) << 16) |
-                             ((response[2] & 0xFF) << 8) |
-                             (response[3] & 0xFF);
-                return balance;
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "Balance SW: " + Integer.toHexString(sw1) + " " + Integer.toHexString(sw2));
+
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    // Balance is stored in first 4 bytes (big-endian)
+                    int balance = ((response[0] & 0xFF) << 24) |
+                                 ((response[1] & 0xFF) << 16) |
+                                 ((response[2] & 0xFF) << 8) |
+                                 (response[3] & 0xFF);
+                    Log.d(TAG, "Parsed balance: " + balance + " won");
+                    return balance;
+                } else {
+                    Log.e(TAG, "Balance command failed");
+                }
             } else {
-                return 0;
+                Log.e(TAG, "Balance response too short: " + response.length);
             }
+            return 0;
         } catch (Exception e) {
             Log.e(TAG, "Error reading balance", e);
             return 0;
