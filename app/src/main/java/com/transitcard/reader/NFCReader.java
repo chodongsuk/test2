@@ -104,6 +104,9 @@ public class NFCReader {
     }
 
     private CardType detectCardType(byte[] cardId, IsoDep isoDep) {
+        Log.d(TAG, "=== Card Detection Started ===");
+        Log.d(TAG, "Card ID: " + bytesToHex(cardId));
+
         // Try to select common Korean transit card AIDs
         byte[] tmoneyAID = new byte[]{
                 (byte) 0xD4, (byte) 0x10, (byte) 0x00, (byte) 0x00,
@@ -127,11 +130,15 @@ public class NFCReader {
 
         // Try T-money (also used by Seoul City Pass and Korea Tour Card)
         try {
+            Log.d(TAG, "Trying T-money AID: " + bytesToHex(tmoneyAID));
             byte[] response = selectAID(isoDep, tmoneyAID);
+            Log.d(TAG, "T-money response: " + (response != null ? bytesToHex(response) : "null"));
             if (response != null && response.length >= 2) {
                 int sw1 = response[response.length - 2] & 0xFF;
                 int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "T-money SW: " + Integer.toHexString(sw1) + " " + Integer.toHexString(sw2));
                 if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.d(TAG, "✓ Detected as T-money based card");
                     // Check if it's Seoul City Pass or Korea Tour Card
                     CardType specificType = detectTmoneyBasedCard(isoDep, cardId);
                     if (specificType != CardType.UNKNOWN) {
@@ -141,52 +148,65 @@ public class NFCReader {
                 }
             }
         } catch (Exception e) {
-            Log.d(TAG, "Not T-money based");
+            Log.d(TAG, "T-money detection error: " + e.getMessage());
         }
 
-        // Try Cashbee
+        // Try Cashbee (EZL)
         try {
+            Log.d(TAG, "Trying Cashbee/EZL AID: " + bytesToHex(cashbeeAID));
             byte[] response = selectAID(isoDep, cashbeeAID);
+            Log.d(TAG, "Cashbee response: " + (response != null ? bytesToHex(response) : "null"));
             if (response != null && response.length >= 2) {
                 int sw1 = response[response.length - 2] & 0xFF;
                 int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "Cashbee SW: " + Integer.toHexString(sw1) + " " + Integer.toHexString(sw2));
                 if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.d(TAG, "✓ Detected as Cashbee/EZL");
                     return CardType.CASHBEE;
                 }
             }
         } catch (Exception e) {
-            Log.d(TAG, "Not Cashbee");
+            Log.d(TAG, "Cashbee detection error: " + e.getMessage());
         }
 
         // Try Rail+
         try {
+            Log.d(TAG, "Trying Rail+ AID: " + bytesToHex(railplusAID));
             byte[] response = selectAID(isoDep, railplusAID);
+            Log.d(TAG, "Rail+ response: " + (response != null ? bytesToHex(response) : "null"));
             if (response != null && response.length >= 2) {
                 int sw1 = response[response.length - 2] & 0xFF;
                 int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "Rail+ SW: " + Integer.toHexString(sw1) + " " + Integer.toHexString(sw2));
                 if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.d(TAG, "✓ Detected as Rail+");
                     return CardType.RAILPLUS;
                 }
             }
         } catch (Exception e) {
-            Log.d(TAG, "Not Rail+");
+            Log.d(TAG, "Rail+ detection error: " + e.getMessage());
         }
 
         // Try M Pass
         try {
+            Log.d(TAG, "Trying M Pass AID: " + bytesToHex(mpassAID));
             byte[] response = selectAID(isoDep, mpassAID);
+            Log.d(TAG, "M Pass response: " + (response != null ? bytesToHex(response) : "null"));
             if (response != null && response.length >= 2) {
                 int sw1 = response[response.length - 2] & 0xFF;
                 int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "M Pass SW: " + Integer.toHexString(sw1) + " " + Integer.toHexString(sw2));
                 if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.d(TAG, "✓ Detected as M Pass");
                     return CardType.MPASS;
                 }
             }
         } catch (Exception e) {
-            Log.d(TAG, "Not M Pass");
+            Log.d(TAG, "M Pass detection error: " + e.getMessage());
         }
 
         // Fallback to ID-based detection
+        Log.e(TAG, "✗ No AID matched - falling back to ID detection");
         return detectCardTypeFromId(cardId);
     }
 
