@@ -327,22 +327,52 @@ public class NFCReader {
                         try {
                             int blockIndex = firstBlock + blockOffset;
                             byte[] blockData = mifareClassic.readBlock(blockIndex);
-                            Log.d(TAG, "Sector " + sectorIndex + " Block " + blockIndex + ": " + bytesToHex(blockData));
 
-                            // Look for balance pattern - typically 4 bytes
-                            // Balance is often stored as big-endian integer
+                            // Check if block contains any non-zero data
+                            boolean hasData = false;
+                            for (byte b : blockData) {
+                                if (b != 0) {
+                                    hasData = true;
+                                    break;
+                                }
+                            }
+
+                            if (hasData) {
+                                Log.d(TAG, "S" + sectorIndex + "B" + blockIndex + ": " + bytesToHex(blockData) + " ✓");
+                            } else {
+                                Log.d(TAG, "S" + sectorIndex + "B" + blockIndex + ": (empty)");
+                            }
+
+                            // Look for balance patterns in multiple formats
                             if (blockData != null && blockData.length >= 4) {
-                                // Check if this looks like a balance (non-zero, reasonable value)
-                                int possibleBalance = ((blockData[0] & 0xFF) << 24) |
-                                                     ((blockData[1] & 0xFF) << 16) |
-                                                     ((blockData[2] & 0xFF) << 8) |
-                                                     (blockData[3] & 0xFF);
+                                // Try big-endian (most common)
+                                int balanceBE = ((blockData[0] & 0xFF) << 24) |
+                                               ((blockData[1] & 0xFF) << 16) |
+                                               ((blockData[2] & 0xFF) << 8) |
+                                               (blockData[3] & 0xFF);
 
-                                // Balance should be reasonable (0 to 500,000 won)
-                                if (possibleBalance > 0 && possibleBalance < 500000 && !balanceFound) {
-                                    balance = possibleBalance;
-                                    balanceFound = true;
-                                    Log.d(TAG, "✓ Found potential balance: " + balance + " won at sector " + sectorIndex + " block " + blockIndex);
+                                // Try little-endian
+                                int balanceLE = ((blockData[3] & 0xFF) << 24) |
+                                               ((blockData[2] & 0xFF) << 16) |
+                                               ((blockData[1] & 0xFF) << 8) |
+                                               (blockData[0] & 0xFF);
+
+                                // Log any potentially interesting values for debugging
+                                if (hasData && (balanceBE > 0 || balanceLE > 0)) {
+                                    Log.d(TAG, "  Values: BE=" + balanceBE + ", LE=" + balanceLE);
+                                }
+
+                                // Balance should be reasonable (100 to 500,000 won)
+                                if (!balanceFound) {
+                                    if (balanceBE >= 100 && balanceBE <= 500000) {
+                                        balance = balanceBE;
+                                        balanceFound = true;
+                                        Log.d(TAG, "  ✓ BALANCE FOUND (BE): " + balance + " won");
+                                    } else if (balanceLE >= 100 && balanceLE <= 500000) {
+                                        balance = balanceLE;
+                                        balanceFound = true;
+                                        Log.d(TAG, "  ✓ BALANCE FOUND (LE): " + balance + " won");
+                                    }
                                 }
                             }
                         } catch (Exception e) {
