@@ -279,13 +279,17 @@ public class NFCReader {
             Log.d(TAG, "Card has " + sectorCount + " sectors, " + blockCount + " blocks");
 
             // Try to authenticate and read sectors to find balance
-            // Common keys for transit cards
+            // Common keys for transit cards and additional Korean transit card keys
             byte[][] keys = {
                 MifareClassic.KEY_DEFAULT,
                 MifareClassic.KEY_MIFARE_APPLICATION_DIRECTORY,
                 new byte[]{(byte)0xFF, (byte)0xFF, (byte)0xFF, (byte)0xFF, (byte)0xFF, (byte)0xFF},
                 new byte[]{(byte)0xA0, (byte)0xA1, (byte)0xA2, (byte)0xA3, (byte)0xA4, (byte)0xA5},
-                new byte[]{(byte)0xD3, (byte)0xF7, (byte)0xD3, (byte)0xF7, (byte)0xD3, (byte)0xF7}
+                new byte[]{(byte)0xD3, (byte)0xF7, (byte)0xD3, (byte)0xF7, (byte)0xD3, (byte)0xF7},
+                new byte[]{(byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00},
+                new byte[]{(byte)0xA0, (byte)0xB0, (byte)0xC0, (byte)0xD0, (byte)0xE0, (byte)0xF0},
+                new byte[]{(byte)0xAA, (byte)0xBB, (byte)0xCC, (byte)0xDD, (byte)0xEE, (byte)0xFF},
+                new byte[]{(byte)0x48, (byte)0x4D, (byte)0x4C, (byte)0x41, (byte)0x42, (byte)0x53}
             };
 
             int balance = 0;
@@ -324,85 +328,113 @@ public class NFCReader {
                     int blocksInSector = mifareClassic.getBlockCountInSector(sectorIndex);
 
                     for (int blockOffset = 0; blockOffset < blocksInSector - 1; blockOffset++) {
+                        int blockIndex = firstBlock + blockOffset;
+                        byte[] blockData = null;
+
+                        // Try to read block with current authentication
                         try {
-                            int blockIndex = firstBlock + blockOffset;
-                            byte[] blockData = mifareClassic.readBlock(blockIndex);
-
-                            // Check if block contains any non-zero data
-                            boolean hasData = false;
-                            for (byte b : blockData) {
-                                if (b != 0) {
-                                    hasData = true;
-                                    break;
-                                }
-                            }
-
-                            if (hasData) {
-                                Log.d(TAG, "S" + sectorIndex + "B" + blockIndex + ": " + bytesToHex(blockData) + " ✓");
-
-                                // Analyze all possible byte positions for 7410 won (0x1CF2)
-                                Log.d(TAG, "Checking all byte combinations for balance...");
-
-                                // Check all 2-byte positions (for values up to 65535)
-                                for (int i = 0; i <= blockData.length - 2; i++) {
-                                    int val2BE = ((blockData[i] & 0xFF) << 8) | (blockData[i+1] & 0xFF);
-                                    int val2LE = ((blockData[i+1] & 0xFF) << 8) | (blockData[i] & 0xFF);
-
-                                    if (val2BE >= 100 && val2BE <= 100000) {
-                                        Log.d(TAG, "  Byte[" + i + "-" + (i+1) + "] BE 2-byte: " + val2BE + " won");
-                                    }
-                                    if (val2LE >= 100 && val2LE <= 100000 && val2LE != val2BE) {
-                                        Log.d(TAG, "  Byte[" + i + "-" + (i+1) + "] LE 2-byte: " + val2LE + " won");
-                                    }
-
-                                    // Check if this is 7410
-                                    if (val2BE == 7410 && !balanceFound) {
-                                        balance = 7410;
-                                        balanceFound = true;
-                                        Log.d(TAG, "  ✓✓✓ FOUND 7410 WON at byte[" + i + "-" + (i+1) + "] (BE 2-byte) ✓✓✓");
-                                    }
-                                    if (val2LE == 7410 && !balanceFound) {
-                                        balance = 7410;
-                                        balanceFound = true;
-                                        Log.d(TAG, "  ✓✓✓ FOUND 7410 WON at byte[" + i + "-" + (i+1) + "] (LE 2-byte) ✓✓✓");
-                                    }
-                                }
-
-                                // Check all 4-byte positions
-                                for (int i = 0; i <= blockData.length - 4; i++) {
-                                    int val4BE = ((blockData[i] & 0xFF) << 24) |
-                                               ((blockData[i+1] & 0xFF) << 16) |
-                                               ((blockData[i+2] & 0xFF) << 8) |
-                                               (blockData[i+3] & 0xFF);
-
-                                    int val4LE = ((blockData[i+3] & 0xFF) << 24) |
-                                               ((blockData[i+2] & 0xFF) << 16) |
-                                               ((blockData[i+1] & 0xFF) << 8) |
-                                               (blockData[i] & 0xFF);
-
-                                    if (val4BE >= 100 && val4BE <= 500000) {
-                                        Log.d(TAG, "  Byte[" + i + "-" + (i+3) + "] BE 4-byte: " + val4BE + " won");
-                                    }
-                                    if (val4LE >= 100 && val4LE <= 500000 && val4LE != val4BE) {
-                                        Log.d(TAG, "  Byte[" + i + "-" + (i+3) + "] LE 4-byte: " + val4LE + " won");
-                                    }
-
-                                    if (val4BE == 7410 && !balanceFound) {
-                                        balance = 7410;
-                                        balanceFound = true;
-                                        Log.d(TAG, "  ✓✓✓ FOUND 7410 WON at byte[" + i + "-" + (i+3) + "] (BE 4-byte) ✓✓✓");
-                                    }
-                                    if (val4LE == 7410 && !balanceFound) {
-                                        balance = 7410;
-                                        balanceFound = true;
-                                        Log.d(TAG, "  ✓✓✓ FOUND 7410 WON at byte[" + i + "-" + (i+3) + "] (LE 4-byte) ✓✓✓");
-                                    }
-                                }
-                            } else {
-                                Log.d(TAG, "S" + sectorIndex + "B" + blockIndex + ": (empty)");
-                            }
+                            blockData = mifareClassic.readBlock(blockIndex);
                         } catch (Exception e) {
-                            Log.d(TAG, "Could not read block " + (firstBlock + blockOffset) + ": " + e.getMessage());
+                            Log.d(TAG, "First read attempt failed for block " + blockIndex + ": " + e.getMessage());
+
+                            // If failed, try re-authenticating with each key specifically for this block
+                            for (byte[] key : keys) {
+                                try {
+                                    if (mifareClassic.authenticateSectorWithKeyA(sectorIndex, key)) {
+                                        blockData = mifareClassic.readBlock(blockIndex);
+                                        Log.d(TAG, "✓ Block " + blockIndex + " read after re-auth with key A");
+                                        break;
+                                    }
+                                } catch (Exception e2) {
+                                    // Try key B
+                                }
+
+                                try {
+                                    if (mifareClassic.authenticateSectorWithKeyB(sectorIndex, key)) {
+                                        blockData = mifareClassic.readBlock(blockIndex);
+                                        Log.d(TAG, "✓ Block " + blockIndex + " read after re-auth with key B");
+                                        break;
+                                    }
+                                } catch (Exception e2) {
+                                    // Try next key
+                                }
+                            }
+                        }
+
+                        if (blockData == null) {
+                            Log.d(TAG, "✗ Could not read block " + blockIndex + " with any key");
+                            continue;
+                        }
+
+                        // Check if block contains any non-zero data
+                        boolean hasData = false;
+                        for (byte b : blockData) {
+                            if (b != 0) {
+                                hasData = true;
+                                break;
+                            }
+                        }
+
+                        if (hasData) {
+                            Log.d(TAG, "S" + sectorIndex + "B" + blockIndex + ": " + bytesToHex(blockData) + " ✓");
+
+                            // Analyze all possible byte positions
+                            Log.d(TAG, "Analyzing block " + blockIndex + " for balance...");
+
+                            // Check all 2-byte positions (for values up to 65535)
+                            for (int i = 0; i <= blockData.length - 2; i++) {
+                                int val2BE = ((blockData[i] & 0xFF) << 8) | (blockData[i+1] & 0xFF);
+                                int val2LE = ((blockData[i+1] & 0xFF) << 8) | (blockData[i] & 0xFF);
+
+                                if (val2BE >= 100 && val2BE <= 100000) {
+                                    Log.d(TAG, "  [" + i + "-" + (i+1) + "] BE16: " + val2BE + " won");
+                                    if (!balanceFound && val2BE >= 1000 && val2BE <= 50000) {
+                                        balance = val2BE;
+                                        balanceFound = true;
+                                        Log.d(TAG, "  ✓✓✓ BALANCE: " + balance + " won ✓✓✓");
+                                    }
+                                }
+                                if (val2LE >= 100 && val2LE <= 100000 && val2LE != val2BE) {
+                                    Log.d(TAG, "  [" + i + "-" + (i+1) + "] LE16: " + val2LE + " won");
+                                    if (!balanceFound && val2LE >= 1000 && val2LE <= 50000) {
+                                        balance = val2LE;
+                                        balanceFound = true;
+                                        Log.d(TAG, "  ✓✓✓ BALANCE: " + balance + " won ✓✓✓");
+                                    }
+                                }
+                            }
+
+                            // Check all 4-byte positions
+                            for (int i = 0; i <= blockData.length - 4; i++) {
+                                int val4BE = ((blockData[i] & 0xFF) << 24) |
+                                           ((blockData[i+1] & 0xFF) << 16) |
+                                           ((blockData[i+2] & 0xFF) << 8) |
+                                           (blockData[i+3] & 0xFF);
+
+                                int val4LE = ((blockData[i+3] & 0xFF) << 24) |
+                                           ((blockData[i+2] & 0xFF) << 16) |
+                                           ((blockData[i+1] & 0xFF) << 8) |
+                                           (blockData[i] & 0xFF);
+
+                                if (val4BE >= 100 && val4BE <= 500000) {
+                                    Log.d(TAG, "  [" + i + "-" + (i+3) + "] BE32: " + val4BE + " won");
+                                    if (!balanceFound) {
+                                        balance = val4BE;
+                                        balanceFound = true;
+                                        Log.d(TAG, "  ✓✓✓ BALANCE: " + balance + " won ✓✓✓");
+                                    }
+                                }
+                                if (val4LE >= 100 && val4LE <= 500000 && val4LE != val4BE) {
+                                    Log.d(TAG, "  [" + i + "-" + (i+3) + "] LE32: " + val4LE + " won");
+                                    if (!balanceFound) {
+                                        balance = val4LE;
+                                        balanceFound = true;
+                                        Log.d(TAG, "  ✓✓✓ BALANCE: " + balance + " won ✓✓✓");
+                                    }
+                                }
+                            }
+                        } else {
+                            Log.d(TAG, "S" + sectorIndex + "B" + blockIndex + ": (empty)");
                         }
                     }
                 } else {
