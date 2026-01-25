@@ -9,36 +9,45 @@ public class NFCReader {
     private static final String TAG = "NFCReader";
 
     public TransitCardData readCard(Tag tag) {
+        Log.d(TAG, "=== readCard: Starting card read ===");
         try {
             byte[] id = tag.getId();
-            Log.d(TAG, "Card ID: " + bytesToHex(id));
+            Log.d(TAG, "readCard: Card ID = " + bytesToHex(id));
+            Log.d(TAG, "readCard: Card ID length = " + id.length + " bytes");
 
             // Try IsoDep first (most common for Korean transit cards)
             IsoDep isoDep = IsoDep.get(tag);
+            Log.d(TAG, "readCard: IsoDep available = " + (isoDep != null));
             if (isoDep != null) {
                 return readIsoDepCard(isoDep, id);
             }
 
             // Try NfcA
             NfcA nfcA = NfcA.get(tag);
+            Log.d(TAG, "readCard: NfcA available = " + (nfcA != null));
             if (nfcA != null) {
                 return readNfcACard(nfcA, id);
             }
 
+            Log.w(TAG, "readCard: No supported NFC technology found");
             return null;
         } catch (Exception e) {
-            Log.e(TAG, "Error reading card", e);
+            Log.e(TAG, "readCard: Error reading card", e);
             return null;
         }
     }
 
     private TransitCardData readIsoDepCard(IsoDep isoDep, byte[] cardId) {
+        Log.d(TAG, "readIsoDepCard: Starting IsoDep card read");
         try {
             isoDep.connect();
             isoDep.setTimeout(5000);
+            Log.d(TAG, "readIsoDepCard: Connected to card, timeout=5000ms");
+            Log.d(TAG, "readIsoDepCard: Max transceive length = " + isoDep.getMaxTransceiveLength());
 
             // Detect card type based on card ID and AID
             CardType cardType = detectCardType(cardId, isoDep);
+            Log.i(TAG, "readIsoDepCard: Detected card type = " + cardType);
 
             CardParser parser = null;
             switch (cardType) {
@@ -70,13 +79,18 @@ public class NFCReader {
 
             TransitCardData result = null;
             if (parser != null) {
+                Log.d(TAG, "readIsoDepCard: Using parser = " + parser.getClass().getSimpleName());
                 result = parser.parse(isoDep, cardId);
+                Log.d(TAG, "readIsoDepCard: Parse result = " + (result != null ? "success" : "null"));
+            } else {
+                Log.w(TAG, "readIsoDepCard: No parser available for card type " + cardType);
             }
 
             isoDep.close();
+            Log.d(TAG, "readIsoDepCard: Connection closed");
             return result;
         } catch (Exception e) {
-            Log.e(TAG, "Error reading IsoDep card", e);
+            Log.e(TAG, "readIsoDepCard: Error reading IsoDep card", e);
             try {
                 isoDep.close();
             } catch (Exception ignored) {
@@ -107,6 +121,9 @@ public class NFCReader {
     }
 
     private CardType detectCardType(byte[] cardId, IsoDep isoDep) {
+        Log.d(TAG, "detectCardType: Starting card type detection");
+        Log.d(TAG, "detectCardType: Card ID = " + bytesToHex(cardId));
+
         // Try to select common Korean transit card AIDs
         byte[] tmoneyAID = new byte[]{
                 (byte) 0xD4, (byte) 0x10, (byte) 0x00, (byte) 0x00,
@@ -238,9 +255,13 @@ public class NFCReader {
         selectCommand[selectCommand.length - 1] = 0x00; // Le
 
         try {
-            return isoDep.transceive(selectCommand);
+            Log.d(TAG, "selectAID: Sending SELECT command for AID: " + bytesToHex(aid));
+            Log.d(TAG, "selectAID: Command = " + bytesToHex(selectCommand));
+            byte[] response = isoDep.transceive(selectCommand);
+            Log.d(TAG, "selectAID: Response = " + bytesToHex(response));
+            return response;
         } catch (Exception e) {
-            Log.e(TAG, "Error selecting AID", e);
+            Log.e(TAG, "selectAID: Error selecting AID " + bytesToHex(aid), e);
             return null;
         }
     }

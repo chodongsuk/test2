@@ -35,4 +35,14 @@ public class TransitCardData {
     public List<Transaction> getTransactionHistory() {
         return transactionHistory;
     }
+
+    @Override
+    public String toString() {
+        return "TransitCardData{" +
+                "cardType=" + cardType +
+                ", cardNumber='" + cardNumber + '\'' +
+                ", balance=" + balance +
+                ", transactions=" + (transactionHistory != null ? transactionHistory.size() : 0) +
+                '}';
+    }
 }

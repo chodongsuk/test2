@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.nfc.NfcAdapter;
 import android.nfc.Tag;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -17,6 +18,8 @@ import java.text.NumberFormat;
 import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
+    private static final String TAG = "MainActivity";
+
     private NfcAdapter nfcAdapter;
     private NFCReader nfcReader;
     private PendingIntent pendingIntent;
@@ -34,11 +37,13 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Log.d(TAG, "onCreate: Starting MainActivity");
         setContentView(R.layout.activity_main);
 
         // Initialize NFC
         nfcAdapter = NfcAdapter.getDefaultAdapter(this);
         nfcReader = new NFCReader();
+        Log.d(TAG, "onCreate: NFC adapter initialized, isEnabled=" + (nfcAdapter != null ? nfcAdapter.isEnabled() : "null"));
 
         // Initialize UI components
         initializeViews();
@@ -112,30 +117,45 @@ public class MainActivity extends AppCompatActivity {
 
     private void handleIntent(Intent intent) {
         String action = intent.getAction();
+        Log.d(TAG, "handleIntent: action=" + action);
+
         if (NfcAdapter.ACTION_TAG_DISCOVERED.equals(action) ||
                 NfcAdapter.ACTION_TECH_DISCOVERED.equals(action) ||
                 NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)) {
 
             Tag tag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
+            Log.d(TAG, "handleIntent: Tag received, tag=" + (tag != null ? tag.toString() : "null"));
             if (tag != null) {
+                String[] techList = tag.getTechList();
+                Log.d(TAG, "handleIntent: Tag tech list:");
+                for (String tech : techList) {
+                    Log.d(TAG, "  - " + tech);
+                }
                 readCard(tag);
             }
         }
     }
 
     private void readCard(Tag tag) {
+        Log.d(TAG, "readCard: Starting to read card");
         showStatus(getString(R.string.reading_card));
 
         // Read card in background
         new Thread(() -> {
+            Log.d(TAG, "readCard: Background thread started");
             TransitCardData cardData = nfcReader.readCard(tag);
+            Log.d(TAG, "readCard: Card data received, cardData=" + (cardData != null ? cardData.toString() : "null"));
 
             // Update UI on main thread
             runOnUiThread(() -> {
                 hideStatus();
                 if (cardData != null) {
+                    Log.i(TAG, "readCard: Successfully read card - Type: " + cardData.getCardType() +
+                            ", Number: " + cardData.getCardNumber() +
+                            ", Balance: " + cardData.getBalance());
                     displayCardData(cardData);
                 } else {
+                    Log.w(TAG, "readCard: Failed to read card data");
                     Toast.makeText(this, R.string.error_reading_card, Toast.LENGTH_SHORT).show();
                 }
             });
@@ -143,6 +163,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void displayCardData(TransitCardData cardData) {
+        Log.d(TAG, "displayCardData: Displaying card data");
+        Log.d(TAG, "displayCardData: Card Type = " + cardData.getCardType().getDisplayName());
+        Log.d(TAG, "displayCardData: Card Number = " + cardData.getCardNumber());
+        Log.d(TAG, "displayCardData: Balance = " + cardData.getBalance());
+        Log.d(TAG, "displayCardData: Transaction count = " +
+                (cardData.getTransactionHistory() != null ? cardData.getTransactionHistory().size() : 0));
+
         // Show card detected message
         Toast.makeText(this, R.string.card_detected, Toast.LENGTH_SHORT).show();
 
