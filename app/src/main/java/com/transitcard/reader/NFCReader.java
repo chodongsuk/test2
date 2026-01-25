@@ -642,6 +642,116 @@ public class NFCReader {
             }
         }
 
+        // 4. EZL/KFTC 전용 proprietary 명령어 시도
+        Log.d(TAG, "tryKftcCommands: === Trying proprietary EZL commands ===");
+
+        // 다양한 CLA 바이트로 잔액 조회 시도
+        byte[] claBytes = {0x00, (byte)0x80, (byte)0x90, (byte)0x94, (byte)0xB0, (byte)0xB2, (byte)0xBC};
+        // 잔액 관련 가능한 INS 바이트들
+        byte[] insBytes = {0x32, 0x4C, 0x50, 0x5C, 0x6C, 0x70, (byte)0xB2, (byte)0xCA, (byte)0xCB, (byte)0xDC, (byte)0xEC, (byte)0xFC};
+
+        for (byte cla : claBytes) {
+            for (byte ins : insBytes) {
+                try {
+                    // Le=00 (variable length response)
+                    byte[] cmd = new byte[]{cla, ins, 0x00, 0x00, 0x00};
+                    byte[] response = isoDep.transceive(cmd);
+
+                    if (response != null && response.length >= 2) {
+                        int sw1 = response[response.length - 2] & 0xFF;
+                        int sw2 = response[response.length - 1] & 0xFF;
+
+                        // 6D00, 6E00 (not supported) 제외하고 로깅
+                        if (!((sw1 == 0x6D && sw2 == 0x00) || (sw1 == 0x6E && sw2 == 0x00))) {
+                            Log.i(TAG, "tryKftcCommands: CLA=" + String.format("%02X", cla) +
+                                  " INS=" + String.format("%02X", ins) +
+                                  " SW=" + String.format("%02X%02X", sw1, sw2) +
+                                  " response=" + bytesToHex(response));
+
+                            if (sw1 == 0x90 && sw2 == 0x00 && response.length > 2) {
+                                Log.i(TAG, "tryKftcCommands: SUCCESS! Parsing balance...");
+                                parseBalanceFromData(response, response.length - 2);
+                                if (kftcBalance > 0) return;
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+
+        // 5. KFTC 특수 잔액 조회 (P1/P2 다양하게)
+        Log.d(TAG, "tryKftcCommands: === Trying KFTC special balance commands ===");
+
+        // KFTC 잔액 조회 명령어 패턴 (CLA=94가 KFTC에서 자주 사용됨)
+        byte[][] specialCmds = {
+            // CLA 94 (KFTC specific)
+            {(byte)0x94, (byte)0xB2, 0x01, 0x0C, 0x00}, // READ RECORD
+            {(byte)0x94, (byte)0xB2, 0x01, 0x14, 0x00},
+            {(byte)0x94, (byte)0xB2, 0x01, 0x1C, 0x00},
+            {(byte)0x94, (byte)0xB2, 0x01, 0x24, 0x00},
+            {(byte)0x94, (byte)0xB0, 0x00, 0x00, 0x10}, // READ BINARY
+            {(byte)0x94, (byte)0xB0, (byte)0x85, 0x00, 0x10}, // READ BINARY SFI 5
+            // GET CHALLENGE and variations
+            {(byte)0x00, (byte)0x84, 0x00, 0x00, 0x08},
+            // SELECT by name with different P1
+            {(byte)0x00, (byte)0xA4, 0x00, 0x00, 0x02, (byte)0x3F, 0x00},  // MF
+            {(byte)0x00, (byte)0xA4, 0x01, 0x00, 0x02, (byte)0xDF, 0x01},  // DF under MF
+            {(byte)0x00, (byte)0xA4, 0x02, 0x04, 0x02, 0x00, 0x01},        // EF under DF
+        };
+
+        for (byte[] cmd : specialCmds) {
+            try {
+                Log.d(TAG, "tryKftcCommands: Special cmd = " + bytesToHex(cmd));
+                byte[] response = isoDep.transceive(cmd);
+                Log.d(TAG, "tryKftcCommands: Response = " + bytesToHex(response));
+
+                if (response != null && response.length >= 2) {
+                    int sw1 = response[response.length - 2] & 0xFF;
+                    int sw2 = response[response.length - 1] & 0xFF;
+
+                    if (sw1 == 0x90 && sw2 == 0x00 && response.length > 2) {
+                        Log.i(TAG, "tryKftcCommands: Special cmd SUCCESS!");
+                        parseBalanceFromData(response, response.length - 2);
+                        if (kftcBalance > 0) return;
+                    }
+                }
+            } catch (Exception e) {
+                Log.d(TAG, "tryKftcCommands: Special cmd failed: " + e.getMessage());
+            }
+        }
+
+        // 6. T-money D4100000140001 AID 시도 (FCI에서 발견된 AID)
+        Log.d(TAG, "tryKftcCommands: === Trying secondary AID D4100000140001 ===");
+        try {
+            byte[] secondaryAid = {(byte)0xD4, 0x10, 0x00, 0x00, 0x14, 0x00, 0x01};
+            byte[] response = selectAID(isoDep, secondaryAid);
+            if (response != null && response.length >= 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "tryKftcCommands: Secondary AID SW=" + String.format("%02X%02X", sw1, sw2));
+
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.i(TAG, "tryKftcCommands: Secondary AID selected! Trying balance commands...");
+
+                    // T-money 스타일 잔액 조회
+                    byte[] balCmd = {(byte)0x90, 0x4C, 0x00, 0x00, 0x04};
+                    byte[] balResp = isoDep.transceive(balCmd);
+                    Log.d(TAG, "tryKftcCommands: Balance cmd response = " + bytesToHex(balResp));
+
+                    if (balResp != null && balResp.length > 2) {
+                        int bsw1 = balResp[balResp.length - 2] & 0xFF;
+                        int bsw2 = balResp[balResp.length - 1] & 0xFF;
+                        if (bsw1 == 0x90 && bsw2 == 0x00) {
+                            parseBalanceFromData(balResp, balResp.length - 2);
+                            if (kftcBalance > 0) return;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "tryKftcCommands: Secondary AID failed: " + e.getMessage());
+        }
+
         // GET PROCESSING OPTIONS
         Log.d(TAG, "tryKftcCommands: === Trying GET PROCESSING OPTIONS ===");
         try {
