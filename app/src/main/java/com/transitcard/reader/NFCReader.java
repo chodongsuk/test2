@@ -153,97 +153,105 @@ public class NFCReader {
 
             int balance = 0;
 
-            // EZL 카드는 특정 섹터에 잔액 정보가 저장됨
-            // 일반적으로 섹터 2에 잔액이 있음 (블록 8, 9, 10)
-            // 키는 보통 기본 키 또는 알려진 키 사용
-
             // 다양한 키 시도
             byte[] KEY_DEFAULT = MifareClassic.KEY_DEFAULT; // FF FF FF FF FF FF
             byte[] KEY_MIFARE_APPLICATION_DIRECTORY = MifareClassic.KEY_MIFARE_APPLICATION_DIRECTORY;
             byte[] KEY_NFC_FORUM = MifareClassic.KEY_NFC_FORUM;
-            // 한국 교통카드에서 자주 사용되는 키
             byte[] KEY_KOREAN_TRANSIT = new byte[]{(byte)0xA0, (byte)0xA1, (byte)0xA2, (byte)0xA3, (byte)0xA4, (byte)0xA5};
 
             byte[][] keysToTry = {KEY_DEFAULT, KEY_MIFARE_APPLICATION_DIRECTORY, KEY_NFC_FORUM, KEY_KOREAN_TRANSIT};
             String[] keyNames = {"DEFAULT", "MAD", "NFC_FORUM", "KOREAN_TRANSIT"};
 
-            // 섹터 2를 읽어 잔액 확인 시도
-            int targetSector = 2;
-            boolean authenticated = false;
+            // 모든 섹터 스캔하여 데이터가 있는 곳 찾기
+            Log.d(TAG, "readMifareClassicCard: === Scanning ALL sectors for data ===");
 
-            for (int k = 0; k < keysToTry.length && !authenticated; k++) {
-                Log.d(TAG, "readMifareClassicCard: Trying key " + keyNames[k] + " for sector " + targetSector);
-                try {
-                    // Key A로 시도
-                    if (mifareClassic.authenticateSectorWithKeyA(targetSector, keysToTry[k])) {
-                        Log.i(TAG, "readMifareClassicCard: Authenticated sector " + targetSector + " with KeyA (" + keyNames[k] + ")");
-                        authenticated = true;
-                    }
-                } catch (Exception e) {
-                    Log.d(TAG, "readMifareClassicCard: KeyA " + keyNames[k] + " failed: " + e.getMessage());
-                }
+            for (int sector = 0; sector < mifareClassic.getSectorCount(); sector++) {
+                boolean authenticated = false;
+                String usedKey = "";
 
-                if (!authenticated) {
+                for (int k = 0; k < keysToTry.length && !authenticated; k++) {
                     try {
-                        // Key B로 시도
-                        if (mifareClassic.authenticateSectorWithKeyB(targetSector, keysToTry[k])) {
-                            Log.i(TAG, "readMifareClassicCard: Authenticated sector " + targetSector + " with KeyB (" + keyNames[k] + ")");
+                        if (mifareClassic.authenticateSectorWithKeyA(sector, keysToTry[k])) {
                             authenticated = true;
+                            usedKey = keyNames[k] + "(A)";
                         }
-                    } catch (Exception e) {
-                        Log.d(TAG, "readMifareClassicCard: KeyB " + keyNames[k] + " failed: " + e.getMessage());
-                    }
-                }
-            }
+                    } catch (Exception ignored) {}
 
-            if (authenticated) {
-                // 섹터의 블록들 읽기
-                int firstBlock = mifareClassic.sectorToBlock(targetSector);
-                int blockCount = mifareClassic.getBlockCountInSector(targetSector);
-                Log.d(TAG, "readMifareClassicCard: Reading sector " + targetSector + ", blocks " + firstBlock + " to " + (firstBlock + blockCount - 1));
-
-                for (int i = 0; i < blockCount - 1; i++) { // 마지막 블록은 트레일러
-                    int blockIndex = firstBlock + i;
-                    try {
-                        byte[] blockData = mifareClassic.readBlock(blockIndex);
-                        Log.d(TAG, "readMifareClassicCard: Block " + blockIndex + " = " + bytesToHex(blockData));
-
-                        // 잔액 파싱 시도 (첫 4바이트를 little-endian으로)
-                        if (i == 0 && blockData.length >= 4) {
-                            balance = ByteBuffer.wrap(blockData, 0, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
-                            Log.d(TAG, "readMifareClassicCard: Parsed balance (LE) = " + balance);
-
-                            // 음수면 big-endian으로 시도
-                            if (balance < 0) {
-                                balance = ByteBuffer.wrap(blockData, 0, 4).getInt();
-                                Log.d(TAG, "readMifareClassicCard: Parsed balance (BE) = " + balance);
-                            }
-                        }
-                    } catch (Exception e) {
-                        Log.e(TAG, "readMifareClassicCard: Error reading block " + blockIndex, e);
-                    }
-                }
-            } else {
-                Log.w(TAG, "readMifareClassicCard: Could not authenticate any sector");
-
-                // 인증 없이 모든 섹터 시도 (일부 카드는 공개 섹터가 있음)
-                for (int sector = 0; sector < mifareClassic.getSectorCount(); sector++) {
-                    for (int k = 0; k < keysToTry.length; k++) {
+                    if (!authenticated) {
                         try {
-                            if (mifareClassic.authenticateSectorWithKeyA(sector, keysToTry[k])) {
-                                Log.i(TAG, "readMifareClassicCard: Found readable sector " + sector + " with " + keyNames[k]);
-                                int firstBlock = mifareClassic.sectorToBlock(sector);
-                                byte[] blockData = mifareClassic.readBlock(firstBlock);
-                                Log.d(TAG, "readMifareClassicCard: Sector " + sector + " Block " + firstBlock + " = " + bytesToHex(blockData));
-                                break;
+                            if (mifareClassic.authenticateSectorWithKeyB(sector, keysToTry[k])) {
+                                authenticated = true;
+                                usedKey = keyNames[k] + "(B)";
                             }
                         } catch (Exception ignored) {}
                     }
                 }
+
+                if (authenticated) {
+                    int firstBlock = mifareClassic.sectorToBlock(sector);
+                    int blockCount = mifareClassic.getBlockCountInSector(sector);
+
+                    for (int i = 0; i < blockCount - 1; i++) { // 마지막 블록은 트레일러
+                        int blockIndex = firstBlock + i;
+                        try {
+                            byte[] blockData = mifareClassic.readBlock(blockIndex);
+                            String hexData = bytesToHex(blockData);
+
+                            // 데이터가 있는 블록만 로그 출력
+                            if (!hexData.equals("00000000000000000000000000000000")) {
+                                Log.i(TAG, "readMifareClassicCard: [Sector " + sector + "] Block " + blockIndex + " (" + usedKey + ") = " + hexData);
+
+                                // 잔액 파싱 시도 - 다양한 위치와 형식 시도
+                                tryParseBalance(blockData, sector, blockIndex);
+                            }
+                        } catch (Exception e) {
+                            Log.e(TAG, "readMifareClassicCard: Error reading sector " + sector + " block " + blockIndex, e);
+                        }
+                    }
+                } else {
+                    Log.d(TAG, "readMifareClassicCard: Sector " + sector + " - authentication failed with all keys");
+                }
+            }
+
+            // 잔액을 찾지 못한 경우, 알려진 EZL 잔액 위치 시도
+            // EZL 카드의 잔액은 보통 특정 블록에 저장됨
+            Log.d(TAG, "readMifareClassicCard: === Trying known EZL balance locations ===");
+
+            // 잔액이 저장될 수 있는 일반적인 블록들 시도
+            int[] possibleBalanceBlocks = {1, 2, 4, 5, 6, 8, 9, 12, 13, 14, 16, 17, 18};
+
+            for (int blockIndex : possibleBalanceBlocks) {
+                int sector = mifareClassic.blockToSector(blockIndex);
+                try {
+                    if (mifareClassic.authenticateSectorWithKeyA(sector, KEY_DEFAULT)) {
+                        byte[] blockData = mifareClassic.readBlock(blockIndex);
+                        String hexData = bytesToHex(blockData);
+
+                        if (!hexData.equals("00000000000000000000000000000000")) {
+                            // 다양한 오프셋과 엔디안으로 잔액 파싱 시도
+                            for (int offset = 0; offset <= 12; offset += 2) {
+                                if (offset + 4 <= blockData.length) {
+                                    int balanceLE = ByteBuffer.wrap(blockData, offset, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
+                                    int balanceBE = ByteBuffer.wrap(blockData, offset, 4).order(ByteOrder.BIG_ENDIAN).getInt();
+
+                                    // 합리적인 잔액 범위인지 확인 (0 ~ 500,000원)
+                                    if (balanceLE > 0 && balanceLE < 500000) {
+                                        Log.i(TAG, "readMifareClassicCard: Possible balance at block " + blockIndex + " offset " + offset + " (LE): " + balanceLE + "원");
+                                        if (balance == 0) balance = balanceLE;
+                                    }
+                                    if (balanceBE > 0 && balanceBE < 500000) {
+                                        Log.i(TAG, "readMifareClassicCard: Possible balance at block " + blockIndex + " offset " + offset + " (BE): " + balanceBE + "원");
+                                        if (balance == 0) balance = balanceBE;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
             }
 
             mifareClassic.close();
-            Log.d(TAG, "readMifareClassicCard: Connection closed, balance = " + balance);
+            Log.d(TAG, "readMifareClassicCard: Connection closed, final balance = " + balance);
 
             return new TransitCardData(
                     CardType.EZL,
@@ -256,6 +264,37 @@ public class NFCReader {
                 mifareClassic.close();
             } catch (Exception ignored) {}
             return null;
+        }
+    }
+
+    private void tryParseBalance(byte[] blockData, int sector, int blockIndex) {
+        // 다양한 오프셋과 엔디안으로 잔액 파싱 시도
+        for (int offset = 0; offset <= 12; offset += 2) {
+            if (offset + 4 <= blockData.length) {
+                int balanceLE = ByteBuffer.wrap(blockData, offset, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
+                int balanceBE = ByteBuffer.wrap(blockData, offset, 4).order(ByteOrder.BIG_ENDIAN).getInt();
+
+                // 합리적인 잔액 범위인지 확인 (100 ~ 500,000원)
+                if (balanceLE >= 100 && balanceLE < 500000) {
+                    Log.i(TAG, "  -> Possible balance at offset " + offset + " (LE): " + balanceLE + "원");
+                }
+                if (balanceBE >= 100 && balanceBE < 500000) {
+                    Log.i(TAG, "  -> Possible balance at offset " + offset + " (BE): " + balanceBE + "원");
+                }
+
+                // 2바이트 값도 확인 (잔액이 작은 경우)
+                if (offset + 2 <= blockData.length) {
+                    int balance2LE = ByteBuffer.wrap(blockData, offset, 2).order(ByteOrder.LITTLE_ENDIAN).getShort() & 0xFFFF;
+                    int balance2BE = ByteBuffer.wrap(blockData, offset, 2).order(ByteOrder.BIG_ENDIAN).getShort() & 0xFFFF;
+
+                    if (balance2LE >= 100 && balance2LE < 100000) {
+                        Log.i(TAG, "  -> Possible balance (2byte) at offset " + offset + " (LE): " + balance2LE + "원");
+                    }
+                    if (balance2BE >= 100 && balance2BE < 100000) {
+                        Log.i(TAG, "  -> Possible balance (2byte) at offset " + offset + " (BE): " + balance2BE + "원");
+                    }
+                }
+            }
         }
     }
 
