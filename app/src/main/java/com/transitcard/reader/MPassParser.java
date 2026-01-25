@@ -30,33 +30,41 @@ public class MPassParser implements CardParser {
 
     private int readBalance(IsoDep isoDep) {
         try {
-            // M Pass 잔액 읽기 명령어 (실제 구현 필요)
+            Log.d(TAG, "Starting M Pass balance read (AID already selected)...");
+
+            // M Pass balance command: 90 4C 00 00 04 (T-money compatible)
             byte[] balanceCommand = new byte[]{
-                    0x00, (byte) 0xB0, 0x00, 0x04, 0x04
+                    (byte) 0x90, (byte) 0x4C, (byte) 0x00, (byte) 0x00,
+                    (byte) 0x04
             };
-
+            Log.d(TAG, "Sending balance command: " + bytesToHex(balanceCommand));
             byte[] response = isoDep.transceive(balanceCommand);
+            Log.d(TAG, "Balance response (" + response.length + " bytes): " + bytesToHex(response));
 
-            if (response != null && response.length >= 4) {
-                // 잔액 파싱 로직
-                return parseBalanceFromResponse(response);
+            if (response.length >= 6) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "Balance SW: " + String.format("%02X%02X", sw1, sw2));
+
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    // Balance is stored in first 4 bytes (big-endian)
+                    int balance = ((response[0] & 0xFF) << 24) |
+                                 ((response[1] & 0xFF) << 16) |
+                                 ((response[2] & 0xFF) << 8) |
+                                 (response[3] & 0xFF);
+                    Log.i(TAG, "Parsed balance: " + balance + " won");
+                    return balance;
+                } else {
+                    Log.e(TAG, "Balance command failed with SW: " + String.format("%02X%02X", sw1, sw2));
+                }
+            } else {
+                Log.e(TAG, "Balance response too short: " + response.length);
             }
+            return 0;
         } catch (Exception e) {
             Log.e(TAG, "Error reading balance", e);
+            return 0;
         }
-        return 0;
-    }
-
-    private int parseBalanceFromResponse(byte[] response) {
-        // 실제 M Pass 잔액 형식에 맞게 파싱
-        // 예시: 4바이트를 정수로 변환
-        if (response.length >= 4) {
-            return ((response[0] & 0xFF) << 24) |
-                   ((response[1] & 0xFF) << 16) |
-                   ((response[2] & 0xFF) << 8) |
-                   (response[3] & 0xFF);
-        }
-        return 0;
     }
 
     private String bytesToHex(byte[] bytes) {
