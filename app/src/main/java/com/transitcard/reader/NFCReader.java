@@ -398,24 +398,64 @@ public class NFCReader {
             }
         }
 
-        // AID 선택 없이 직접 잔액 읽기 시도 (일부 카드는 AID 선택 없이 동작)
-        Log.d(TAG, "detectCardType: Trying direct read without AID selection...");
-        try {
-            // T-money 잔액 조회 명령어 시도
-            byte[] balanceCmd = new byte[]{(byte) 0x90, (byte) 0x4C, 0x00, 0x00, 0x04};
-            Log.d(TAG, "detectCardType: Direct balance command = " + bytesToHex(balanceCmd));
-            byte[] response = isoDep.transceive(balanceCmd);
-            Log.d(TAG, "detectCardType: Direct balance response = " + bytesToHex(response));
-            if (response != null && response.length >= 4) {
-                int sw1 = response[response.length - 2] & 0xFF;
-                int sw2 = response[response.length - 1] & 0xFF;
-                if (sw1 == 0x90 && sw2 == 0x00) {
-                    Log.i(TAG, "detectCardType: Direct read succeeded, treating as EZL");
-                    return CardType.EZL;
+        // AID 선택 없이 직접 다양한 명령어 시도
+        Log.d(TAG, "detectCardType: Trying direct commands without AID selection...");
+
+        // 다양한 잔액 조회 명령어 시도
+        byte[][] directCommands = {
+                // T-money 잔액 조회
+                {(byte) 0x90, (byte) 0x4C, 0x00, 0x00, 0x04},
+                // GET DATA
+                {(byte) 0x00, (byte) 0xCA, 0x00, 0x00, 0x00},
+                // READ BINARY
+                {(byte) 0x00, (byte) 0xB0, 0x00, 0x00, 0x10},
+                // READ RECORD
+                {(byte) 0x00, (byte) 0xB2, 0x01, 0x04, 0x00},
+                // SELECT MF
+                {(byte) 0x00, (byte) 0xA4, 0x00, 0x00, 0x02, 0x3F, 0x00},
+                // GET CHALLENGE
+                {(byte) 0x00, (byte) 0x84, 0x00, 0x00, 0x08},
+                // EZL 추정 명령어들
+                {(byte) 0x90, (byte) 0x5C, 0x00, 0x00, 0x04},
+                {(byte) 0x90, (byte) 0x6C, 0x00, 0x00, 0x04},
+                {(byte) 0x90, (byte) 0x32, 0x00, 0x00, 0x04},
+                // Felica 스타일 명령어
+                {(byte) 0xFF, (byte) 0x00, 0x00, 0x00, 0x04},
+        };
+
+        String[] cmdNames = {
+                "T-money Balance", "GET DATA", "READ BINARY", "READ RECORD",
+                "SELECT MF", "GET CHALLENGE", "EZL-5C", "EZL-6C", "EZL-32", "Felica-style"
+        };
+
+        for (int i = 0; i < directCommands.length; i++) {
+            try {
+                Log.d(TAG, "detectCardType: Trying " + cmdNames[i] + " = " + bytesToHex(directCommands[i]));
+                byte[] response = isoDep.transceive(directCommands[i]);
+                Log.d(TAG, "detectCardType: " + cmdNames[i] + " response = " + bytesToHex(response));
+
+                if (response != null && response.length >= 2) {
+                    int sw1 = response[response.length - 2] & 0xFF;
+                    int sw2 = response[response.length - 1] & 0xFF;
+                    Log.d(TAG, "detectCardType: " + cmdNames[i] + " SW=" + String.format("%02X%02X", sw1, sw2));
+
+                    // 성공적인 응답이면 데이터 분석
+                    if (sw1 == 0x90 && sw2 == 0x00 && response.length > 2) {
+                        Log.i(TAG, "detectCardType: " + cmdNames[i] + " succeeded with data!");
+
+                        // 잔액 파싱 시도
+                        if (response.length >= 6) {
+                            int balanceLE = ByteBuffer.wrap(response, 0, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
+                            int balanceBE = ByteBuffer.wrap(response, 0, 4).order(ByteOrder.BIG_ENDIAN).getInt();
+                            Log.i(TAG, "detectCardType: Possible balance (LE): " + balanceLE);
+                            Log.i(TAG, "detectCardType: Possible balance (BE): " + balanceBE);
+                        }
+                        return CardType.EZL;
+                    }
                 }
+            } catch (Exception e) {
+                Log.d(TAG, "detectCardType: " + cmdNames[i] + " failed: " + e.getMessage());
             }
-        } catch (Exception e) {
-            Log.d(TAG, "detectCardType: Direct read failed: " + e.getMessage());
         }
 
         // Fallback to ID-based detection
