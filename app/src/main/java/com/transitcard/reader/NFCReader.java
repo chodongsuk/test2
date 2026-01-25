@@ -125,6 +125,7 @@ public class NFCReader {
         Log.d(TAG, "detectCardType: Card ID = " + bytesToHex(cardId));
 
         // Try to select common Korean transit card AIDs
+        // T-money 계열 (T-money, 캐시비, 레일플러스 등 대부분의 한국 교통카드)
         byte[] tmoneyAID = new byte[]{
                 (byte) 0xD4, (byte) 0x10, (byte) 0x00, (byte) 0x00,
                 (byte) 0x03, (byte) 0x00, (byte) 0x01
@@ -145,87 +146,126 @@ public class NFCReader {
                 (byte) 0x03, (byte) 0x00, (byte) 0x04
         };
 
-        byte[] ezlAID = new byte[]{
+        // EZL (이즐) - 코레일 교통카드, 여러 AID 시도
+        byte[] ezlAID1 = new byte[]{
                 (byte) 0xD4, (byte) 0x10, (byte) 0x00, (byte) 0x00,
                 (byte) 0x03, (byte) 0x00, (byte) 0x05
         };
 
+        // EZL 대체 AID (T-money 호환)
+        byte[] ezlAID2 = new byte[]{
+                (byte) 0xD4, (byte) 0x10, (byte) 0x00, (byte) 0x00,
+                (byte) 0x03, (byte) 0x00, (byte) 0x06
+        };
+
+        // 먼저 EZL 시도 (EZL 카드가 T-money보다 먼저 감지되도록)
+        Log.d(TAG, "detectCardType: Trying EZL AID 1...");
+        try {
+            byte[] response = selectAID(isoDep, ezlAID1);
+            if (response != null && response.length >= 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "detectCardType: EZL AID 1 response SW=" + String.format("%02X%02X", sw1, sw2));
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.i(TAG, "detectCardType: EZL card detected (AID 1)");
+                    return CardType.EZL;
+                }
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "detectCardType: EZL AID 1 failed: " + e.getMessage());
+        }
+
+        Log.d(TAG, "detectCardType: Trying EZL AID 2...");
+        try {
+            byte[] response = selectAID(isoDep, ezlAID2);
+            if (response != null && response.length >= 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "detectCardType: EZL AID 2 response SW=" + String.format("%02X%02X", sw1, sw2));
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.i(TAG, "detectCardType: EZL card detected (AID 2)");
+                    return CardType.EZL;
+                }
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "detectCardType: EZL AID 2 failed: " + e.getMessage());
+        }
+
         // Try T-money (also used by Seoul City Pass and Korea Tour Card)
+        Log.d(TAG, "detectCardType: Trying T-money AID...");
         try {
             byte[] response = selectAID(isoDep, tmoneyAID);
             if (response != null && response.length >= 2) {
                 int sw1 = response[response.length - 2] & 0xFF;
                 int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "detectCardType: T-money response SW=" + String.format("%02X%02X", sw1, sw2));
                 if (sw1 == 0x90 && sw2 == 0x00) {
                     // Check if it's Seoul City Pass or Korea Tour Card
                     CardType specificType = detectTmoneyBasedCard(isoDep, cardId);
                     if (specificType != CardType.UNKNOWN) {
                         return specificType;
                     }
+                    Log.i(TAG, "detectCardType: T-money card detected");
                     return CardType.TMONEY;
                 }
             }
         } catch (Exception e) {
-            Log.d(TAG, "Not T-money based");
+            Log.d(TAG, "detectCardType: T-money failed: " + e.getMessage());
         }
 
         // Try Cashbee
+        Log.d(TAG, "detectCardType: Trying Cashbee AID...");
         try {
             byte[] response = selectAID(isoDep, cashbeeAID);
             if (response != null && response.length >= 2) {
                 int sw1 = response[response.length - 2] & 0xFF;
                 int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "detectCardType: Cashbee response SW=" + String.format("%02X%02X", sw1, sw2));
                 if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.i(TAG, "detectCardType: Cashbee card detected");
                     return CardType.CASHBEE;
                 }
             }
         } catch (Exception e) {
-            Log.d(TAG, "Not Cashbee");
+            Log.d(TAG, "detectCardType: Cashbee failed: " + e.getMessage());
         }
 
         // Try Rail+
+        Log.d(TAG, "detectCardType: Trying Rail+ AID...");
         try {
             byte[] response = selectAID(isoDep, railplusAID);
             if (response != null && response.length >= 2) {
                 int sw1 = response[response.length - 2] & 0xFF;
                 int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "detectCardType: Rail+ response SW=" + String.format("%02X%02X", sw1, sw2));
                 if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.i(TAG, "detectCardType: Rail+ card detected");
                     return CardType.RAILPLUS;
                 }
             }
         } catch (Exception e) {
-            Log.d(TAG, "Not Rail+");
+            Log.d(TAG, "detectCardType: Rail+ failed: " + e.getMessage());
         }
 
         // Try M Pass
+        Log.d(TAG, "detectCardType: Trying M Pass AID...");
         try {
             byte[] response = selectAID(isoDep, mpassAID);
             if (response != null && response.length >= 2) {
                 int sw1 = response[response.length - 2] & 0xFF;
                 int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "detectCardType: M Pass response SW=" + String.format("%02X%02X", sw1, sw2));
                 if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.i(TAG, "detectCardType: M Pass card detected");
                     return CardType.MPASS;
                 }
             }
         } catch (Exception e) {
-            Log.d(TAG, "Not M Pass");
-        }
-
-        // Try EZL
-        try {
-            byte[] response = selectAID(isoDep, ezlAID);
-            if (response != null && response.length >= 2) {
-                int sw1 = response[response.length - 2] & 0xFF;
-                int sw2 = response[response.length - 1] & 0xFF;
-                if (sw1 == 0x90 && sw2 == 0x00) {
-                    return CardType.EZL;
-                }
-            }
-        } catch (Exception e) {
-            Log.d(TAG, "Not EZL");
+            Log.d(TAG, "detectCardType: M Pass failed: " + e.getMessage());
         }
 
         // Fallback to ID-based detection
+        Log.w(TAG, "detectCardType: No AID matched, falling back to ID-based detection");
         return detectCardTypeFromId(cardId);
     }
 
