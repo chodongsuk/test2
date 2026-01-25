@@ -46,28 +46,59 @@ public class EZLParser implements CardParser {
 
     private int readBalance(IsoDep isoDep) {
         try {
-            // Read balance from file
-            // Command: Read Record (File 04, Record 00)
-            byte[] command = new byte[]{
-                    (byte) 0x90, (byte) 0xB0, // CLA, INS
-                    (byte) 0x00, (byte) 0x00, // P1, P2
-                    (byte) 0x04                  // Le
+            Log.d(TAG, "readBalance: Starting EZL balance read...");
+
+            // EZL 카드는 Secondary AID 선택 후 T-money 스타일 명령어 사용
+            // Step 1: Select Secondary AID (D4100000140001)
+            byte[] selectCmd = new byte[]{
+                    0x00, (byte)0xA4, 0x04, 0x00, 0x07,
+                    (byte)0xD4, 0x10, 0x00, 0x00, 0x14, 0x00, 0x01,
+                    0x00
             };
+            Log.d(TAG, "readBalance: Selecting Secondary AID = " + bytesToHex(selectCmd));
+            byte[] selectResp = isoDep.transceive(selectCmd);
+            Log.d(TAG, "readBalance: Secondary AID response = " + bytesToHex(selectResp));
 
-            Log.d(TAG, "readBalance: Sending command = " + bytesToHex(command));
-            byte[] response = isoDep.transceive(command);
-            Log.d(TAG, "readBalance: Response = " + bytesToHex(response));
-            Log.d(TAG, "readBalance: Response length = " + response.length);
+            if (selectResp != null && selectResp.length >= 2) {
+                int sw1 = selectResp[selectResp.length - 2] & 0xFF;
+                int sw2 = selectResp[selectResp.length - 1] & 0xFF;
 
-            if (response.length >= 6) {
-                // Balance is typically stored in bytes 0-3 (big-endian)
-                int balance = ByteBuffer.wrap(response, 0, 4).getInt();
-                Log.d(TAG, "readBalance: Parsed balance = " + balance);
-                return balance;
-            } else {
-                Log.w(TAG, "readBalance: Response too short, returning 0");
-                return 0;
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.d(TAG, "readBalance: Secondary AID selected, reading balance...");
+
+                    // Step 2: T-money style balance command (90 4C 00 00 04)
+                    byte[] balanceCmd = new byte[]{
+                            (byte) 0x90, (byte) 0x4C, (byte) 0x00, (byte) 0x00,
+                            (byte) 0x04
+                    };
+                    Log.d(TAG, "readBalance: Sending balance command = " + bytesToHex(balanceCmd));
+                    byte[] response = isoDep.transceive(balanceCmd);
+                    Log.d(TAG, "readBalance: Balance response = " + bytesToHex(response));
+
+                    if (response.length >= 6) {
+                        int bsw1 = response[response.length - 2] & 0xFF;
+                        int bsw2 = response[response.length - 1] & 0xFF;
+                        Log.d(TAG, "readBalance: Balance SW = " + String.format("%02X%02X", bsw1, bsw2));
+
+                        if (bsw1 == 0x90 && bsw2 == 0x00) {
+                            // Balance is stored in first 4 bytes (big-endian)
+                            int balance = ((response[0] & 0xFF) << 24) |
+                                         ((response[1] & 0xFF) << 16) |
+                                         ((response[2] & 0xFF) << 8) |
+                                         (response[3] & 0xFF);
+                            Log.i(TAG, "readBalance: SUCCESS - Balance = " + balance + "원");
+                            return balance;
+                        } else {
+                            Log.e(TAG, "readBalance: Balance command failed with SW: " + String.format("%02X%02X", bsw1, bsw2));
+                        }
+                    } else {
+                        Log.w(TAG, "readBalance: Balance response too short: " + response.length);
+                    }
+                } else {
+                    Log.e(TAG, "readBalance: Secondary AID selection failed with SW: " + String.format("%02X%02X", sw1, sw2));
+                }
             }
+            return 0;
         } catch (Exception e) {
             Log.e(TAG, "readBalance: Error reading balance", e);
             return 0;
