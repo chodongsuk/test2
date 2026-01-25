@@ -2,8 +2,12 @@ package com.transitcard.reader;
 
 import android.nfc.Tag;
 import android.nfc.tech.IsoDep;
+import android.nfc.tech.MifareClassic;
 import android.nfc.tech.NfcA;
 import android.util.Log;
+
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 public class NFCReader {
     private static final String TAG = "NFCReader";
@@ -15,7 +19,24 @@ public class NFCReader {
             Log.d(TAG, "readCard: Card ID = " + bytesToHex(id));
             Log.d(TAG, "readCard: Card ID length = " + id.length + " bytes");
 
-            // Try IsoDep first (most common for Korean transit cards)
+            // Log all available technologies
+            String[] techList = tag.getTechList();
+            Log.d(TAG, "readCard: Available technologies:");
+            for (String tech : techList) {
+                Log.d(TAG, "readCard:   - " + tech);
+            }
+
+            // Try MifareClassic first (EZL cards use this)
+            MifareClassic mifareClassic = MifareClassic.get(tag);
+            Log.d(TAG, "readCard: MifareClassic available = " + (mifareClassic != null));
+            if (mifareClassic != null) {
+                TransitCardData result = readMifareClassicCard(mifareClassic, id);
+                if (result != null) {
+                    return result;
+                }
+            }
+
+            // Try IsoDep (most common for Korean transit cards)
             IsoDep isoDep = IsoDep.get(tag);
             Log.d(TAG, "readCard: IsoDep available = " + (isoDep != null));
             if (isoDep != null) {
@@ -116,6 +137,124 @@ public class NFCReader {
                 nfcA.close();
             } catch (Exception ignored) {
             }
+            return null;
+        }
+    }
+
+    private TransitCardData readMifareClassicCard(MifareClassic mifareClassic, byte[] cardId) {
+        Log.d(TAG, "=== readMifareClassicCard: Starting Mifare Classic read ===");
+        try {
+            mifareClassic.connect();
+            Log.d(TAG, "readMifareClassicCard: Connected to card");
+            Log.d(TAG, "readMifareClassicCard: Card type = " + mifareClassic.getType());
+            Log.d(TAG, "readMifareClassicCard: Sector count = " + mifareClassic.getSectorCount());
+            Log.d(TAG, "readMifareClassicCard: Block count = " + mifareClassic.getBlockCount());
+            Log.d(TAG, "readMifareClassicCard: Size = " + mifareClassic.getSize() + " bytes");
+
+            int balance = 0;
+
+            // EZL 카드는 특정 섹터에 잔액 정보가 저장됨
+            // 일반적으로 섹터 2에 잔액이 있음 (블록 8, 9, 10)
+            // 키는 보통 기본 키 또는 알려진 키 사용
+
+            // 다양한 키 시도
+            byte[] KEY_DEFAULT = MifareClassic.KEY_DEFAULT; // FF FF FF FF FF FF
+            byte[] KEY_MIFARE_APPLICATION_DIRECTORY = MifareClassic.KEY_MIFARE_APPLICATION_DIRECTORY;
+            byte[] KEY_NFC_FORUM = MifareClassic.KEY_NFC_FORUM;
+            // 한국 교통카드에서 자주 사용되는 키
+            byte[] KEY_KOREAN_TRANSIT = new byte[]{(byte)0xA0, (byte)0xA1, (byte)0xA2, (byte)0xA3, (byte)0xA4, (byte)0xA5};
+
+            byte[][] keysToTry = {KEY_DEFAULT, KEY_MIFARE_APPLICATION_DIRECTORY, KEY_NFC_FORUM, KEY_KOREAN_TRANSIT};
+            String[] keyNames = {"DEFAULT", "MAD", "NFC_FORUM", "KOREAN_TRANSIT"};
+
+            // 섹터 2를 읽어 잔액 확인 시도
+            int targetSector = 2;
+            boolean authenticated = false;
+
+            for (int k = 0; k < keysToTry.length && !authenticated; k++) {
+                Log.d(TAG, "readMifareClassicCard: Trying key " + keyNames[k] + " for sector " + targetSector);
+                try {
+                    // Key A로 시도
+                    if (mifareClassic.authenticateSectorWithKeyA(targetSector, keysToTry[k])) {
+                        Log.i(TAG, "readMifareClassicCard: Authenticated sector " + targetSector + " with KeyA (" + keyNames[k] + ")");
+                        authenticated = true;
+                    }
+                } catch (Exception e) {
+                    Log.d(TAG, "readMifareClassicCard: KeyA " + keyNames[k] + " failed: " + e.getMessage());
+                }
+
+                if (!authenticated) {
+                    try {
+                        // Key B로 시도
+                        if (mifareClassic.authenticateSectorWithKeyB(targetSector, keysToTry[k])) {
+                            Log.i(TAG, "readMifareClassicCard: Authenticated sector " + targetSector + " with KeyB (" + keyNames[k] + ")");
+                            authenticated = true;
+                        }
+                    } catch (Exception e) {
+                        Log.d(TAG, "readMifareClassicCard: KeyB " + keyNames[k] + " failed: " + e.getMessage());
+                    }
+                }
+            }
+
+            if (authenticated) {
+                // 섹터의 블록들 읽기
+                int firstBlock = mifareClassic.sectorToBlock(targetSector);
+                int blockCount = mifareClassic.getBlockCountInSector(targetSector);
+                Log.d(TAG, "readMifareClassicCard: Reading sector " + targetSector + ", blocks " + firstBlock + " to " + (firstBlock + blockCount - 1));
+
+                for (int i = 0; i < blockCount - 1; i++) { // 마지막 블록은 트레일러
+                    int blockIndex = firstBlock + i;
+                    try {
+                        byte[] blockData = mifareClassic.readBlock(blockIndex);
+                        Log.d(TAG, "readMifareClassicCard: Block " + blockIndex + " = " + bytesToHex(blockData));
+
+                        // 잔액 파싱 시도 (첫 4바이트를 little-endian으로)
+                        if (i == 0 && blockData.length >= 4) {
+                            balance = ByteBuffer.wrap(blockData, 0, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
+                            Log.d(TAG, "readMifareClassicCard: Parsed balance (LE) = " + balance);
+
+                            // 음수면 big-endian으로 시도
+                            if (balance < 0) {
+                                balance = ByteBuffer.wrap(blockData, 0, 4).getInt();
+                                Log.d(TAG, "readMifareClassicCard: Parsed balance (BE) = " + balance);
+                            }
+                        }
+                    } catch (Exception e) {
+                        Log.e(TAG, "readMifareClassicCard: Error reading block " + blockIndex, e);
+                    }
+                }
+            } else {
+                Log.w(TAG, "readMifareClassicCard: Could not authenticate any sector");
+
+                // 인증 없이 모든 섹터 시도 (일부 카드는 공개 섹터가 있음)
+                for (int sector = 0; sector < mifareClassic.getSectorCount(); sector++) {
+                    for (int k = 0; k < keysToTry.length; k++) {
+                        try {
+                            if (mifareClassic.authenticateSectorWithKeyA(sector, keysToTry[k])) {
+                                Log.i(TAG, "readMifareClassicCard: Found readable sector " + sector + " with " + keyNames[k]);
+                                int firstBlock = mifareClassic.sectorToBlock(sector);
+                                byte[] blockData = mifareClassic.readBlock(firstBlock);
+                                Log.d(TAG, "readMifareClassicCard: Sector " + sector + " Block " + firstBlock + " = " + bytesToHex(blockData));
+                                break;
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                }
+            }
+
+            mifareClassic.close();
+            Log.d(TAG, "readMifareClassicCard: Connection closed, balance = " + balance);
+
+            return new TransitCardData(
+                    CardType.EZL,
+                    bytesToHex(cardId),
+                    balance
+            );
+        } catch (Exception e) {
+            Log.e(TAG, "readMifareClassicCard: Error reading Mifare Classic card", e);
+            try {
+                mifareClassic.close();
+            } catch (Exception ignored) {}
             return null;
         }
     }
