@@ -39,21 +39,38 @@ public class TMoneyParser implements CardParser {
 
     private int readBalance(IsoDep isoDep) {
         try {
-            // Read balance from file
-            // Command: Read Record (File 04, Record 00)
-            byte[] command = new byte[]{
-                    (byte) 0x90, (byte) 0xB0, // CLA, INS
-                    (byte) 0x00, (byte) 0x00, // P1, P2
-                    (byte) 0x04                  // Le
-            };
+            Log.d(TAG, "Starting balance read (AID already selected by NFCReader)...");
 
-            byte[] response = isoDep.transceive(command);
+            // AID is already selected by NFCReader, directly read balance
+            // T-money balance command: 90 4C 00 00 04
+            byte[] balanceCommand = new byte[]{
+                    (byte) 0x90, (byte) 0x4C, (byte) 0x00, (byte) 0x00,
+                    (byte) 0x04
+            };
+            Log.d(TAG, "Sending balance command: " + bytesToHex(balanceCommand));
+            byte[] response = isoDep.transceive(balanceCommand);
+            Log.d(TAG, "Balance response (" + response.length + " bytes): " + bytesToHex(response));
+
             if (response.length >= 6) {
-                // Balance is typically stored in bytes 0-3 (little-endian)
-                return ByteBuffer.wrap(response, 0, 4).getInt();
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+                Log.d(TAG, "Balance SW: " + Integer.toHexString(sw1) + " " + Integer.toHexString(sw2));
+
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    // Balance is stored in first 4 bytes (big-endian)
+                    int balance = ((response[0] & 0xFF) << 24) |
+                                 ((response[1] & 0xFF) << 16) |
+                                 ((response[2] & 0xFF) << 8) |
+                                 (response[3] & 0xFF);
+                    Log.d(TAG, "Parsed balance: " + balance + " won");
+                    return balance;
+                } else {
+                    Log.e(TAG, "Balance command failed with SW: " + Integer.toHexString(sw1) + Integer.toHexString(sw2));
+                }
             } else {
-                return 0;
+                Log.e(TAG, "Balance response too short: " + response.length);
             }
+            return 0;
         } catch (Exception e) {
             Log.e(TAG, "Error reading balance", e);
             return 0;
