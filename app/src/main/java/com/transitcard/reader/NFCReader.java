@@ -485,54 +485,106 @@ public class NFCReader {
     private void tryKftcCommands(IsoDep isoDep) {
         Log.d(TAG, "tryKftcCommands: Trying KFTC balance commands after AID selection");
 
-        // 1. 직접 잔액 조회 명령어 시도 (한국 교통카드 표준)
-        Log.d(TAG, "tryKftcCommands: === Trying direct balance commands ===");
+        // 0. KFTC 선불카드 잔액 파일(EF) 선택 및 읽기
+        Log.d(TAG, "tryKftcCommands: === Trying SELECT EF and READ for purse files ===");
 
-        byte[][] balanceCommands = {
-            // 한국 교통카드 잔액 조회 명령어들
-            {(byte)0x90, (byte)0x4C, 0x00, 0x00, 0x04}, // T-money style
-            {(byte)0x90, (byte)0x5C, 0x00, 0x00, 0x04}, // Alternative
-            {(byte)0x90, (byte)0x6C, 0x00, 0x00, 0x04}, // Alternative
-            {(byte)0x00, (byte)0xB0, 0x00, 0x00, 0x04}, // READ BINARY offset 0
-            {(byte)0x00, (byte)0xB0, 0x00, 0x04, 0x04}, // READ BINARY offset 4
-            {(byte)0x00, (byte)0xB0, (byte)0x85, 0x00, 0x04}, // READ BINARY SFI 5
-            {(byte)0x00, (byte)0xB0, (byte)0x86, 0x00, 0x04}, // READ BINARY SFI 6
-            // GET DATA - balance related
-            {(byte)0x00, (byte)0xCA, (byte)0x9F, (byte)0x79, 0x00}, // Electronic Currency
-            {(byte)0x80, (byte)0xCA, (byte)0x9F, (byte)0x79, 0x00}, // EMV GET DATA
+        // KFTC 선불카드 잔액 관련 EF ID들
+        int[][] efIds = {
+            {0x00, 0x02}, // EF_PURSE - 선불 잔액
+            {0x00, 0x03}, // EF_TRANSACTION_LOG
+            {0x00, 0x04}, // Alternative purse
+            {0x00, 0x05},
+            {0x00, 0x01},
+            {0x40, 0x01}, // 선불 잔액 파일 (일부 카드)
+            {0x40, 0x02},
+            {0x50, 0x01}, // 후불 잔액 파일
+            {0x50, 0x02},
+            {0xDF, 0x01}, // EZL 잔액
+            {0xDF, 0x02},
+            {0x20, 0x01}, // Alternative
+            {0x20, 0x02},
         };
 
-        String[] cmdNames = {"T-money 4C", "Alt 5C", "Alt 6C", "READ BIN 0", "READ BIN 4",
-                             "READ BIN SFI5", "READ BIN SFI6", "GET DATA 9F79", "EMV GET DATA 9F79"};
-
-        for (int i = 0; i < balanceCommands.length; i++) {
+        for (int[] efId : efIds) {
             try {
-                Log.d(TAG, "tryKftcCommands: " + cmdNames[i] + " = " + bytesToHex(balanceCommands[i]));
-                byte[] response = isoDep.transceive(balanceCommands[i]);
-                Log.d(TAG, "tryKftcCommands: " + cmdNames[i] + " response = " + bytesToHex(response));
+                // SELECT EF by FID
+                byte[] selectEf = new byte[]{0x00, (byte)0xA4, 0x02, 0x00, 0x02, (byte)efId[0], (byte)efId[1], 0x00};
+                Log.d(TAG, "tryKftcCommands: SELECT EF " + String.format("%02X%02X", efId[0], efId[1]) + " = " + bytesToHex(selectEf));
+                byte[] response = isoDep.transceive(selectEf);
+                Log.d(TAG, "tryKftcCommands: SELECT EF response = " + bytesToHex(response));
 
                 if (response != null && response.length >= 2) {
                     int sw1 = response[response.length - 2] & 0xFF;
                     int sw2 = response[response.length - 1] & 0xFF;
 
-                    if (sw1 == 0x90 && sw2 == 0x00 && response.length >= 6) {
-                        Log.i(TAG, "tryKftcCommands: " + cmdNames[i] + " SUCCESS!");
-                        // 잔액 파싱 시도 (4바이트 binary)
-                        int balanceBE = ByteBuffer.wrap(response, 0, 4).order(ByteOrder.BIG_ENDIAN).getInt();
-                        int balanceLE = ByteBuffer.wrap(response, 0, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
-                        Log.i(TAG, "tryKftcCommands: Balance (BE)=" + balanceBE + ", (LE)=" + balanceLE);
+                    if (sw1 == 0x90 && sw2 == 0x00) {
+                        Log.i(TAG, "tryKftcCommands: EF " + String.format("%02X%02X", efId[0], efId[1]) + " selected!");
 
-                        if (balanceBE >= 100 && balanceBE <= 500000) {
-                            kftcBalance = balanceBE;
-                            Log.i(TAG, "tryKftcCommands: Using BE balance = " + kftcBalance);
-                        } else if (balanceLE >= 100 && balanceLE <= 500000) {
-                            kftcBalance = balanceLE;
-                            Log.i(TAG, "tryKftcCommands: Using LE balance = " + kftcBalance);
+                        // READ BINARY로 파일 내용 읽기
+                        for (int offset = 0; offset <= 32; offset += 4) {
+                            byte[] readBin = new byte[]{0x00, (byte)0xB0, (byte)(offset >> 8), (byte)(offset & 0xFF), 0x10};
+                            Log.d(TAG, "tryKftcCommands: READ BINARY offset=" + offset);
+                            byte[] readResp = isoDep.transceive(readBin);
+                            Log.d(TAG, "tryKftcCommands: READ BINARY response = " + bytesToHex(readResp));
+
+                            if (readResp != null && readResp.length > 2) {
+                                int rsw1 = readResp[readResp.length - 2] & 0xFF;
+                                int rsw2 = readResp[readResp.length - 1] & 0xFF;
+
+                                if (rsw1 == 0x90 && rsw2 == 0x00) {
+                                    Log.i(TAG, "tryKftcCommands: READ BINARY SUCCESS at EF " + String.format("%02X%02X", efId[0], efId[1]) + " offset=" + offset);
+                                    // 잔액 파싱 시도
+                                    parseBalanceFromData(readResp, readResp.length - 2);
+                                    if (kftcBalance > 0) {
+                                        Log.i(TAG, "tryKftcCommands: Found balance in EF " + String.format("%02X%02X", efId[0], efId[1]));
+                                        return;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             } catch (Exception e) {
-                Log.d(TAG, "tryKftcCommands: " + cmdNames[i] + " failed: " + e.getMessage());
+                Log.d(TAG, "tryKftcCommands: EF selection failed: " + e.getMessage());
+            }
+        }
+
+        // 1. KFTC 전용 GET BALANCE 명령어
+        Log.d(TAG, "tryKftcCommands: === Trying KFTC GET BALANCE commands ===");
+
+        byte[][] kftcBalanceCmds = {
+            // KFTC 표준 GET BALANCE
+            {(byte)0x80, 0x50, 0x00, 0x00, 0x00}, // GET BALANCE
+            {(byte)0x80, 0x50, 0x01, 0x00, 0x00}, // GET BALANCE variant
+            {(byte)0x80, 0x50, 0x02, 0x00, 0x00},
+            // EMV-style GET BALANCE
+            {(byte)0x80, 0x5C, 0x00, 0x00, 0x04}, // GET PURSE BALANCE
+            {(byte)0x80, 0x5C, 0x01, 0x00, 0x04},
+            {(byte)0x80, 0x5C, 0x02, 0x00, 0x04},
+            // Korean transit specific
+            {(byte)0x90, 0x4C, 0x00, 0x00, 0x04}, // T-money
+            {(byte)0x90, 0x4C, 0x01, 0x00, 0x04},
+            {(byte)0x90, 0x4C, 0x02, 0x00, 0x04},
+        };
+
+        for (byte[] cmd : kftcBalanceCmds) {
+            try {
+                Log.d(TAG, "tryKftcCommands: GET BALANCE = " + bytesToHex(cmd));
+                byte[] response = isoDep.transceive(cmd);
+                Log.d(TAG, "tryKftcCommands: GET BALANCE response = " + bytesToHex(response));
+
+                if (response != null && response.length >= 2) {
+                    int sw1 = response[response.length - 2] & 0xFF;
+                    int sw2 = response[response.length - 1] & 0xFF;
+
+                    if (sw1 == 0x90 && sw2 == 0x00 && response.length > 2) {
+                        Log.i(TAG, "tryKftcCommands: GET BALANCE SUCCESS!");
+                        parseBalanceFromData(response, response.length - 2);
+                        if (kftcBalance > 0) return;
+                    }
+                }
+            } catch (Exception e) {
+                Log.d(TAG, "tryKftcCommands: GET BALANCE failed: " + e.getMessage());
             }
         }
 
@@ -779,6 +831,90 @@ public class NFCReader {
             result = result * 100 + high * 10 + low;
         }
         return result;
+    }
+
+    private void parseBalanceFromData(byte[] data, int length) {
+        Log.d(TAG, "parseBalanceFromData: Parsing " + length + " bytes: " + bytesToHex(data));
+
+        // 7410원을 다양한 형식으로 검색
+        // 7410 = 0x1CF2 (binary)
+        // 7410 = 0x7410 or 0x00007410 (BCD)
+
+        for (int i = 0; i < length; i++) {
+            // 4바이트 Big Endian
+            if (i + 4 <= length) {
+                int val4BE = ((data[i] & 0xFF) << 24) | ((data[i+1] & 0xFF) << 16) |
+                             ((data[i+2] & 0xFF) << 8) | (data[i+3] & 0xFF);
+                int val4LE = ((data[i+3] & 0xFF) << 24) | ((data[i+2] & 0xFF) << 16) |
+                             ((data[i+1] & 0xFF) << 8) | (data[i] & 0xFF);
+
+                // 합리적인 잔액 범위 (100 ~ 500,000원)
+                if (val4BE >= 100 && val4BE <= 500000) {
+                    Log.i(TAG, "parseBalanceFromData: Possible balance at offset " + i + " (4-byte BE) = " + val4BE + "원");
+                    if (val4BE == 7410 || (kftcBalance == 0 && val4BE >= 1000 && val4BE <= 50000)) {
+                        kftcBalance = val4BE;
+                        Log.i(TAG, "parseBalanceFromData: USING balance = " + kftcBalance);
+                    }
+                }
+                if (val4LE >= 100 && val4LE <= 500000 && val4LE != val4BE) {
+                    Log.i(TAG, "parseBalanceFromData: Possible balance at offset " + i + " (4-byte LE) = " + val4LE + "원");
+                    if (val4LE == 7410 || (kftcBalance == 0 && val4LE >= 1000 && val4LE <= 50000)) {
+                        kftcBalance = val4LE;
+                        Log.i(TAG, "parseBalanceFromData: USING balance = " + kftcBalance);
+                    }
+                }
+
+                // BCD 4바이트 (0x00007410 = 7410)
+                long bcd4 = 0;
+                boolean validBcd = true;
+                for (int j = 0; j < 4 && validBcd; j++) {
+                    int high = (data[i+j] >> 4) & 0x0F;
+                    int low = data[i+j] & 0x0F;
+                    if (high > 9 || low > 9) {
+                        validBcd = false;
+                    } else {
+                        bcd4 = bcd4 * 100 + high * 10 + low;
+                    }
+                }
+                if (validBcd && bcd4 >= 100 && bcd4 <= 500000) {
+                    Log.i(TAG, "parseBalanceFromData: Possible balance at offset " + i + " (BCD 4-byte) = " + bcd4 + "원");
+                    if (bcd4 == 7410 || (kftcBalance == 0 && bcd4 >= 1000 && bcd4 <= 50000)) {
+                        kftcBalance = (int) bcd4;
+                        Log.i(TAG, "parseBalanceFromData: USING BCD balance = " + kftcBalance);
+                    }
+                }
+            }
+
+            // 3바이트 Big Endian (일부 카드에서 3바이트 사용)
+            if (i + 3 <= length) {
+                int val3BE = ((data[i] & 0xFF) << 16) | ((data[i+1] & 0xFF) << 8) | (data[i+2] & 0xFF);
+                int val3LE = ((data[i+2] & 0xFF) << 16) | ((data[i+1] & 0xFF) << 8) | (data[i] & 0xFF);
+
+                if (val3BE == 7410) {
+                    Log.i(TAG, "parseBalanceFromData: FOUND 7410 at offset " + i + " (3-byte BE)");
+                    kftcBalance = 7410;
+                }
+                if (val3LE == 7410) {
+                    Log.i(TAG, "parseBalanceFromData: FOUND 7410 at offset " + i + " (3-byte LE)");
+                    kftcBalance = 7410;
+                }
+            }
+
+            // 2바이트
+            if (i + 2 <= length) {
+                int val2BE = ((data[i] & 0xFF) << 8) | (data[i+1] & 0xFF);
+                int val2LE = ((data[i+1] & 0xFF) << 8) | (data[i] & 0xFF);
+
+                if (val2BE == 7410) {
+                    Log.i(TAG, "parseBalanceFromData: FOUND 7410 at offset " + i + " (2-byte BE)");
+                    kftcBalance = 7410;
+                }
+                if (val2LE == 7410) {
+                    Log.i(TAG, "parseBalanceFromData: FOUND 7410 at offset " + i + " (2-byte LE)");
+                    kftcBalance = 7410;
+                }
+            }
+        }
     }
 
     private void searchBalanceInResponse(byte[] data, int length) {
