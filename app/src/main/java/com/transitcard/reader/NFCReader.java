@@ -386,6 +386,10 @@ public class NFCReader {
                             case 3: return CardType.HANPAY;
                             case 4:
                             case 5: return CardType.EZL;
+                            case 8: // KFTC
+                                Log.i(TAG, "detectCardType: KFTC AID succeeded, trying KFTC commands");
+                                tryKftcCommands(isoDep);
+                                return CardType.EZL;
                             default:
                                 // 알 수 없는 AID지만 성공하면 EZL로 시도
                                 Log.i(TAG, "detectCardType: Unknown AID succeeded, trying as EZL");
@@ -461,6 +465,79 @@ public class NFCReader {
         // Fallback to ID-based detection
         Log.w(TAG, "detectCardType: No AID matched, falling back to ID-based detection");
         return detectCardTypeFromId(cardId);
+    }
+
+    private void tryKftcCommands(IsoDep isoDep) {
+        Log.d(TAG, "tryKftcCommands: Trying KFTC balance commands after AID selection");
+
+        // KFTC 표준 명령어들
+        byte[][] kftcCommands = {
+                // GET BALANCE (KFTC 표준)
+                {(byte) 0x90, (byte) 0x4C, 0x00, 0x00, 0x04},
+                // READ BINARY
+                {(byte) 0x00, (byte) 0xB0, 0x00, 0x00, 0x20},
+                {(byte) 0x00, (byte) 0xB0, (byte) 0x85, 0x00, 0x20},
+                {(byte) 0x00, (byte) 0xB0, (byte) 0x86, 0x00, 0x20},
+                // READ RECORD
+                {(byte) 0x00, (byte) 0xB2, 0x01, 0x04, 0x20},
+                {(byte) 0x00, (byte) 0xB2, 0x01, 0x0C, 0x20},
+                {(byte) 0x00, (byte) 0xB2, 0x01, 0x14, 0x20},
+                // SELECT EF (Elementary File)
+                {(byte) 0x00, (byte) 0xA4, 0x02, 0x00, 0x02, 0x00, 0x01},
+                {(byte) 0x00, (byte) 0xA4, 0x02, 0x00, 0x02, 0x00, 0x02},
+                {(byte) 0x00, (byte) 0xA4, 0x02, 0x00, 0x02, 0x00, 0x05},
+                // GET DATA
+                {(byte) 0x00, (byte) 0xCA, 0x00, 0x00, 0x00},
+                {(byte) 0x00, (byte) 0xCA, (byte) 0x9F, 0x17, 0x00},
+                // KFTC 잔액 조회 (다양한 변형)
+                {(byte) 0x00, (byte) 0x32, 0x01, 0x00, 0x04},
+                {(byte) 0x80, (byte) 0x32, 0x01, 0x00, 0x04},
+                {(byte) 0x80, (byte) 0x5C, 0x00, 0x00, 0x04},
+                {(byte) 0x80, (byte) 0xCA, 0x00, 0x00, 0x04},
+        };
+
+        String[] cmdNames = {
+                "GET BALANCE", "READ BINARY 00", "READ BINARY 85", "READ BINARY 86",
+                "READ RECORD 04", "READ RECORD 0C", "READ RECORD 14",
+                "SELECT EF 01", "SELECT EF 02", "SELECT EF 05",
+                "GET DATA", "GET DATA 9F17", "KFTC 32-01", "KFTC 80-32", "KFTC 80-5C", "KFTC 80-CA"
+        };
+
+        for (int i = 0; i < kftcCommands.length; i++) {
+            try {
+                Log.d(TAG, "tryKftcCommands: Trying " + cmdNames[i] + " = " + bytesToHex(kftcCommands[i]));
+                byte[] response = isoDep.transceive(kftcCommands[i]);
+                Log.d(TAG, "tryKftcCommands: " + cmdNames[i] + " response = " + bytesToHex(response));
+
+                if (response != null && response.length >= 2) {
+                    int sw1 = response[response.length - 2] & 0xFF;
+                    int sw2 = response[response.length - 1] & 0xFF;
+                    Log.d(TAG, "tryKftcCommands: " + cmdNames[i] + " SW=" + String.format("%02X%02X", sw1, sw2));
+
+                    // 성공 또는 데이터 있는 응답
+                    if ((sw1 == 0x90 && sw2 == 0x00) || (sw1 == 0x61) || (sw1 == 0x6C)) {
+                        Log.i(TAG, "tryKftcCommands: " + cmdNames[i] + " succeeded!");
+
+                        if (response.length > 2) {
+                            // 잔액 파싱 시도
+                            for (int offset = 0; offset <= response.length - 4; offset++) {
+                                int balanceLE = ByteBuffer.wrap(response, offset, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
+                                int balanceBE = ByteBuffer.wrap(response, offset, 4).order(ByteOrder.BIG_ENDIAN).getInt();
+
+                                if (balanceLE > 0 && balanceLE < 500000) {
+                                    Log.i(TAG, "tryKftcCommands: Possible balance at offset " + offset + " (LE): " + balanceLE + "원");
+                                }
+                                if (balanceBE > 0 && balanceBE < 500000) {
+                                    Log.i(TAG, "tryKftcCommands: Possible balance at offset " + offset + " (BE): " + balanceBE + "원");
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.d(TAG, "tryKftcCommands: " + cmdNames[i] + " failed: " + e.getMessage());
+            }
+        }
     }
 
     private CardType detectTmoneyBasedCard(IsoDep isoDep, byte[] cardId) {
