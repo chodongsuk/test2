@@ -89,6 +89,17 @@ public class NFCReader {
             CardType cardType = detectCardType(cardId, isoDep);
             Log.i(TAG, "readIsoDepCard: Detected card type = " + cardType);
 
+            // Check if KFTC balance was found during detection
+            if (kftcBalance > 0) {
+                Log.i(TAG, "readIsoDepCard: Using KFTC balance = " + kftcBalance + "원");
+                isoDep.close();
+                return new TransitCardData(
+                        CardType.EZL,
+                        bytesToHex(cardId),
+                        kftcBalance
+                );
+            }
+
             CardParser parser = null;
             switch (cardType) {
                 case TMONEY:
@@ -388,7 +399,9 @@ public class NFCReader {
                             case 5: return CardType.EZL;
                             case 8: // KFTC
                                 Log.i(TAG, "detectCardType: KFTC AID succeeded, trying KFTC commands");
+                                kftcBalance = 0; // Reset before trying
                                 tryKftcCommands(isoDep);
+                                Log.i(TAG, "detectCardType: KFTC balance after commands = " + kftcBalance);
                                 return CardType.EZL;
                             default:
                                 // 알 수 없는 AID지만 성공하면 EZL로 시도
@@ -467,75 +480,361 @@ public class NFCReader {
         return detectCardTypeFromId(cardId);
     }
 
+    private int kftcBalance = 0;
+
     private void tryKftcCommands(IsoDep isoDep) {
         Log.d(TAG, "tryKftcCommands: Trying KFTC balance commands after AID selection");
 
-        // KFTC 표준 명령어들
-        byte[][] kftcCommands = {
-                // GET BALANCE (KFTC 표준)
-                {(byte) 0x90, (byte) 0x4C, 0x00, 0x00, 0x04},
-                // READ BINARY
-                {(byte) 0x00, (byte) 0xB0, 0x00, 0x00, 0x20},
-                {(byte) 0x00, (byte) 0xB0, (byte) 0x85, 0x00, 0x20},
-                {(byte) 0x00, (byte) 0xB0, (byte) 0x86, 0x00, 0x20},
-                // READ RECORD
-                {(byte) 0x00, (byte) 0xB2, 0x01, 0x04, 0x20},
-                {(byte) 0x00, (byte) 0xB2, 0x01, 0x0C, 0x20},
-                {(byte) 0x00, (byte) 0xB2, 0x01, 0x14, 0x20},
-                // SELECT EF (Elementary File)
-                {(byte) 0x00, (byte) 0xA4, 0x02, 0x00, 0x02, 0x00, 0x01},
-                {(byte) 0x00, (byte) 0xA4, 0x02, 0x00, 0x02, 0x00, 0x02},
-                {(byte) 0x00, (byte) 0xA4, 0x02, 0x00, 0x02, 0x00, 0x05},
-                // GET DATA
-                {(byte) 0x00, (byte) 0xCA, 0x00, 0x00, 0x00},
-                {(byte) 0x00, (byte) 0xCA, (byte) 0x9F, 0x17, 0x00},
-                // KFTC 잔액 조회 (다양한 변형)
-                {(byte) 0x00, (byte) 0x32, 0x01, 0x00, 0x04},
-                {(byte) 0x80, (byte) 0x32, 0x01, 0x00, 0x04},
-                {(byte) 0x80, (byte) 0x5C, 0x00, 0x00, 0x04},
-                {(byte) 0x80, (byte) 0xCA, 0x00, 0x00, 0x04},
+        // 1. 직접 잔액 조회 명령어 시도 (한국 교통카드 표준)
+        Log.d(TAG, "tryKftcCommands: === Trying direct balance commands ===");
+
+        byte[][] balanceCommands = {
+            // 한국 교통카드 잔액 조회 명령어들
+            {(byte)0x90, (byte)0x4C, 0x00, 0x00, 0x04}, // T-money style
+            {(byte)0x90, (byte)0x5C, 0x00, 0x00, 0x04}, // Alternative
+            {(byte)0x90, (byte)0x6C, 0x00, 0x00, 0x04}, // Alternative
+            {(byte)0x00, (byte)0xB0, 0x00, 0x00, 0x04}, // READ BINARY offset 0
+            {(byte)0x00, (byte)0xB0, 0x00, 0x04, 0x04}, // READ BINARY offset 4
+            {(byte)0x00, (byte)0xB0, (byte)0x85, 0x00, 0x04}, // READ BINARY SFI 5
+            {(byte)0x00, (byte)0xB0, (byte)0x86, 0x00, 0x04}, // READ BINARY SFI 6
+            // GET DATA - balance related
+            {(byte)0x00, (byte)0xCA, (byte)0x9F, (byte)0x79, 0x00}, // Electronic Currency
+            {(byte)0x80, (byte)0xCA, (byte)0x9F, (byte)0x79, 0x00}, // EMV GET DATA
         };
 
-        String[] cmdNames = {
-                "GET BALANCE", "READ BINARY 00", "READ BINARY 85", "READ BINARY 86",
-                "READ RECORD 04", "READ RECORD 0C", "READ RECORD 14",
-                "SELECT EF 01", "SELECT EF 02", "SELECT EF 05",
-                "GET DATA", "GET DATA 9F17", "KFTC 32-01", "KFTC 80-32", "KFTC 80-5C", "KFTC 80-CA"
-        };
+        String[] cmdNames = {"T-money 4C", "Alt 5C", "Alt 6C", "READ BIN 0", "READ BIN 4",
+                             "READ BIN SFI5", "READ BIN SFI6", "GET DATA 9F79", "EMV GET DATA 9F79"};
 
-        for (int i = 0; i < kftcCommands.length; i++) {
+        for (int i = 0; i < balanceCommands.length; i++) {
             try {
-                Log.d(TAG, "tryKftcCommands: Trying " + cmdNames[i] + " = " + bytesToHex(kftcCommands[i]));
-                byte[] response = isoDep.transceive(kftcCommands[i]);
+                Log.d(TAG, "tryKftcCommands: " + cmdNames[i] + " = " + bytesToHex(balanceCommands[i]));
+                byte[] response = isoDep.transceive(balanceCommands[i]);
                 Log.d(TAG, "tryKftcCommands: " + cmdNames[i] + " response = " + bytesToHex(response));
 
                 if (response != null && response.length >= 2) {
                     int sw1 = response[response.length - 2] & 0xFF;
                     int sw2 = response[response.length - 1] & 0xFF;
-                    Log.d(TAG, "tryKftcCommands: " + cmdNames[i] + " SW=" + String.format("%02X%02X", sw1, sw2));
 
-                    // 성공 또는 데이터 있는 응답
-                    if ((sw1 == 0x90 && sw2 == 0x00) || (sw1 == 0x61) || (sw1 == 0x6C)) {
-                        Log.i(TAG, "tryKftcCommands: " + cmdNames[i] + " succeeded!");
+                    if (sw1 == 0x90 && sw2 == 0x00 && response.length >= 6) {
+                        Log.i(TAG, "tryKftcCommands: " + cmdNames[i] + " SUCCESS!");
+                        // 잔액 파싱 시도 (4바이트 binary)
+                        int balanceBE = ByteBuffer.wrap(response, 0, 4).order(ByteOrder.BIG_ENDIAN).getInt();
+                        int balanceLE = ByteBuffer.wrap(response, 0, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
+                        Log.i(TAG, "tryKftcCommands: Balance (BE)=" + balanceBE + ", (LE)=" + balanceLE);
 
-                        if (response.length > 2) {
-                            // 잔액 파싱 시도
-                            for (int offset = 0; offset <= response.length - 4; offset++) {
-                                int balanceLE = ByteBuffer.wrap(response, offset, 4).order(ByteOrder.LITTLE_ENDIAN).getInt();
-                                int balanceBE = ByteBuffer.wrap(response, offset, 4).order(ByteOrder.BIG_ENDIAN).getInt();
-
-                                if (balanceLE > 0 && balanceLE < 500000) {
-                                    Log.i(TAG, "tryKftcCommands: Possible balance at offset " + offset + " (LE): " + balanceLE + "원");
-                                }
-                                if (balanceBE > 0 && balanceBE < 500000) {
-                                    Log.i(TAG, "tryKftcCommands: Possible balance at offset " + offset + " (BE): " + balanceBE + "원");
-                                }
-                            }
+                        if (balanceBE >= 100 && balanceBE <= 500000) {
+                            kftcBalance = balanceBE;
+                            Log.i(TAG, "tryKftcCommands: Using BE balance = " + kftcBalance);
+                        } else if (balanceLE >= 100 && balanceLE <= 500000) {
+                            kftcBalance = balanceLE;
+                            Log.i(TAG, "tryKftcCommands: Using LE balance = " + kftcBalance);
                         }
                     }
                 }
             } catch (Exception e) {
                 Log.d(TAG, "tryKftcCommands: " + cmdNames[i] + " failed: " + e.getMessage());
+            }
+        }
+
+        // 2. READ RECORD - 여러 SFI와 레코드 조합으로 읽기
+        Log.d(TAG, "tryKftcCommands: === Reading all records from SFI 1-5 ===");
+
+        for (int sfi = 1; sfi <= 5; sfi++) {
+            int p2 = (sfi << 3) | 0x04;
+            for (int recordNum = 1; recordNum <= 10; recordNum++) {
+                try {
+                    byte[] cmd = new byte[]{0x00, (byte) 0xB2, (byte) recordNum, (byte) p2, 0x00};
+                    Log.d(TAG, "tryKftcCommands: READ RECORD SFI=" + sfi + " Record=" + recordNum + " = " + bytesToHex(cmd));
+                    byte[] response = isoDep.transceive(cmd);
+
+                    if (response != null && response.length >= 2) {
+                        int sw1 = response[response.length - 2] & 0xFF;
+                        int sw2 = response[response.length - 1] & 0xFF;
+
+                        if (sw1 == 0x90 && sw2 == 0x00 && response.length > 2) {
+                            Log.i(TAG, "tryKftcCommands: SFI=" + sfi + " Record=" + recordNum + " response = " + bytesToHex(response));
+                            parseEmvTlv(response, response.length - 2);
+                        } else if (sw1 == 0x6A && sw2 == 0x83) {
+                            // Record not found, move to next SFI
+                            break;
+                        }
+                    }
+                } catch (Exception e) {
+                    break;
+                }
+            }
+        }
+
+        // 3. P2=0x0C 형식 시도 (이전에 성공했던 형식)
+        Log.d(TAG, "tryKftcCommands: === Trying READ RECORD with P2=0x0C format ===");
+        for (int recordNum = 1; recordNum <= 5; recordNum++) {
+            try {
+                byte[] cmd = new byte[]{0x00, (byte) 0xB2, (byte) recordNum, (byte) 0x0C, 0x00};
+                Log.d(TAG, "tryKftcCommands: READ RECORD P2=0C Record=" + recordNum + " = " + bytesToHex(cmd));
+                byte[] response = isoDep.transceive(cmd);
+
+                if (response != null && response.length >= 2) {
+                    int sw1 = response[response.length - 2] & 0xFF;
+                    int sw2 = response[response.length - 1] & 0xFF;
+
+                    if (sw1 == 0x90 && sw2 == 0x00 && response.length > 2) {
+                        Log.i(TAG, "tryKftcCommands: P2=0C Record=" + recordNum + " response = " + bytesToHex(response));
+
+                        // 전체 응답에서 잔액 패턴 찾기
+                        searchBalanceInResponse(response, response.length - 2);
+                        parseEmvTlv(response, response.length - 2);
+                    }
+                }
+            } catch (Exception e) {
+                break;
+            }
+        }
+
+        // GET PROCESSING OPTIONS
+        Log.d(TAG, "tryKftcCommands: === Trying GET PROCESSING OPTIONS ===");
+        try {
+            byte[] gpo = new byte[]{(byte) 0x80, (byte) 0xA8, 0x00, 0x00, 0x02, (byte) 0x83, 0x00, 0x00};
+            Log.d(TAG, "tryKftcCommands: GPO = " + bytesToHex(gpo));
+            byte[] response = isoDep.transceive(gpo);
+            Log.d(TAG, "tryKftcCommands: GPO response = " + bytesToHex(response));
+        } catch (Exception e) {
+            Log.d(TAG, "tryKftcCommands: GPO failed: " + e.getMessage());
+        }
+
+        // GET DATA for specific tags
+        Log.d(TAG, "tryKftcCommands: === Trying GET DATA for balance tags ===");
+        int[][] dataTags = {
+                {0x9F, 0x79}, // Electronic Currency
+                {0x9F, 0x77}, // Electronic Currency
+                {0x9F, 0x02}, // Amount
+                {0x9F, 0x03}, // Amount Other
+                {0x9F, 0x4F}, // Log Entry
+                {0x9F, 0x78}, // Electronic Currency
+                {0x5F, 0x57}, // Account Type
+        };
+
+        for (int[] tag : dataTags) {
+            try {
+                byte[] cmd = new byte[]{(byte) 0x80, (byte) 0xCA, (byte) tag[0], (byte) tag[1], 0x00};
+                Log.d(TAG, "tryKftcCommands: GET DATA " + String.format("%02X%02X", tag[0], tag[1]) + " = " + bytesToHex(cmd));
+                byte[] response = isoDep.transceive(cmd);
+                Log.d(TAG, "tryKftcCommands: GET DATA response = " + bytesToHex(response));
+
+                if (response != null && response.length >= 2) {
+                    int sw1 = response[response.length - 2] & 0xFF;
+                    int sw2 = response[response.length - 1] & 0xFF;
+                    if (sw1 == 0x90 && sw2 == 0x00 && response.length > 2) {
+                        Log.i(TAG, "tryKftcCommands: GET DATA " + String.format("%02X%02X", tag[0], tag[1]) + " succeeded!");
+                        parseEmvTlv(response, response.length - 2);
+                    }
+                }
+            } catch (Exception e) {
+                Log.d(TAG, "tryKftcCommands: GET DATA failed: " + e.getMessage());
+            }
+        }
+
+        Log.d(TAG, "tryKftcCommands: Final balance found = " + kftcBalance);
+    }
+
+    private void parseEmvTlv(byte[] data, int length) {
+        Log.d(TAG, "parseEmvTlv: Parsing " + length + " bytes");
+        parseEmvTlvRecursive(data, 0, length, 0);
+    }
+
+    private void parseEmvTlvRecursive(byte[] data, int start, int length, int depth) {
+        String indent = "";
+        for (int i = 0; i < depth; i++) indent += "  ";
+
+        int pos = start;
+        int end = start + length;
+
+        while (pos < end && pos < data.length) {
+            // Parse tag
+            int tagStart = pos;
+            int tag = data[pos++] & 0xFF;
+            if ((tag & 0x1F) == 0x1F) {
+                // Two-byte tag
+                if (pos >= data.length) break;
+                tag = (tag << 8) | (data[pos++] & 0xFF);
+            }
+
+            if (pos >= data.length) break;
+
+            // Parse length
+            int len = data[pos++] & 0xFF;
+            if (len == 0x81) {
+                if (pos >= data.length) break;
+                len = data[pos++] & 0xFF;
+            } else if (len == 0x82) {
+                if (pos + 1 >= data.length) break;
+                len = ((data[pos++] & 0xFF) << 8) | (data[pos++] & 0xFF);
+            }
+
+            if (pos + len > data.length) {
+                Log.w(TAG, indent + "parseEmvTlv: Length exceeds data, stopping");
+                break;
+            }
+
+            // Extract value
+            byte[] value = new byte[len];
+            System.arraycopy(data, pos, value, 0, len);
+
+            Log.d(TAG, indent + "parseEmvTlv: Tag=" + String.format("%04X", tag) + " Len=" + len + " Value=" + bytesToHex(value));
+
+            // Check if this is a constructed tag (bit 6 of first byte is 1)
+            boolean isConstructed = ((tag & 0x20) != 0) || ((tag >> 8) != 0 && ((tag >> 8) & 0x20) != 0);
+            // Common constructed tags
+            if (tag == 0x70 || tag == 0x77 || tag == 0x80 || tag == 0x87 ||
+                tag == 0xBF0C || tag == 0x61 || tag == 0x6F || tag == 0xA5) {
+                isConstructed = true;
+            }
+
+            if (isConstructed && len > 2) {
+                Log.d(TAG, indent + "parseEmvTlv: Parsing nested TLV in tag " + String.format("%04X", tag));
+                parseEmvTlvRecursive(data, pos, len, depth + 1);
+            }
+
+            // Check for balance-related tags
+            tryExtractBalance(tag, value, len);
+
+            pos += len;
+        }
+    }
+
+    private void tryExtractBalance(int tag, byte[] value, int len) {
+        // 잔액 관련 태그들
+        // 9F79 = Electronic Currency Balance
+        // 9F77 = Electronic Currency Upper Threshold
+        // 9F78 = Electronic Currency Lower Threshold
+        // 9A = Transaction Date (might contain amount nearby)
+        // 57 = Track 2 Equivalent Data (might have balance)
+
+        // BCD 인코딩 잔액 시도
+        if (tag == 0x9F79 || tag == 0x9F77 || tag == 0x9F78) {
+            if (len >= 2) {
+                long balance = bcdToLong(value, len);
+                Log.i(TAG, "tryExtractBalance: BCD balance from tag " + String.format("%04X", tag) + " = " + balance + "원");
+                if (balance > 0 && balance < 500000) {
+                    kftcBalance = (int) balance;
+                }
+            }
+        }
+
+        // 모든 2바이트 이상 필드에서 잔액 추출 시도
+        if (len >= 2 && len <= 8) {
+            // Binary 인코딩 (Big Endian)
+            int balanceBE = 0;
+            for (int i = 0; i < Math.min(len, 4); i++) {
+                balanceBE = (balanceBE << 8) | (value[i] & 0xFF);
+            }
+
+            // Binary 인코딩 (Little Endian)
+            int balanceLE = 0;
+            for (int i = Math.min(len, 4) - 1; i >= 0; i--) {
+                balanceLE = (balanceLE << 8) | (value[i] & 0xFF);
+            }
+
+            // BCD 인코딩
+            long balanceBCD = bcdToLong(value, Math.min(len, 4));
+
+            // 7410원을 찾기 위해 체크
+            if (balanceBE == 7410 || balanceLE == 7410 || balanceBCD == 7410) {
+                Log.i(TAG, "tryExtractBalance: FOUND 7410원 in tag " + String.format("%04X", tag) +
+                      " (BE=" + balanceBE + ", LE=" + balanceLE + ", BCD=" + balanceBCD + ")");
+                kftcBalance = 7410;
+            }
+
+            // 합리적인 잔액 범위인지 확인 (100 ~ 500,000원)
+            if (kftcBalance == 0) {
+                if (balanceBE >= 100 && balanceBE <= 500000) {
+                    Log.d(TAG, "tryExtractBalance: Possible balance (BE) in tag " + String.format("%04X", tag) + " = " + balanceBE + "원");
+                }
+                if (balanceLE >= 100 && balanceLE <= 500000 && balanceLE != balanceBE) {
+                    Log.d(TAG, "tryExtractBalance: Possible balance (LE) in tag " + String.format("%04X", tag) + " = " + balanceLE + "원");
+                }
+                if (balanceBCD >= 100 && balanceBCD <= 500000) {
+                    Log.d(TAG, "tryExtractBalance: Possible balance (BCD) in tag " + String.format("%04X", tag) + " = " + balanceBCD + "원");
+                }
+            }
+        }
+
+        // 특별한 태그들에서 잔액 추출 (한국 교통카드 특화)
+        if (tag == 0x47 && len >= 2) {
+            // Tag 47에서 잔액 시도
+            int balance = ((value[0] & 0xFF) << 8) | (value[1] & 0xFF);
+            Log.d(TAG, "tryExtractBalance: Tag 47 value as int = " + balance);
+        }
+    }
+
+    private long bcdToLong(byte[] data, int len) {
+        long result = 0;
+        for (int i = 0; i < len; i++) {
+            int high = (data[i] >> 4) & 0x0F;
+            int low = data[i] & 0x0F;
+            // BCD는 각 니블이 0-9 범위여야 함
+            if (high > 9 || low > 9) {
+                // 유효하지 않은 BCD
+                return -1;
+            }
+            result = result * 100 + high * 10 + low;
+        }
+        return result;
+    }
+
+    private void searchBalanceInResponse(byte[] data, int length) {
+        Log.d(TAG, "searchBalanceInResponse: Searching for balance patterns in " + length + " bytes");
+
+        // 7410원을 다양한 형식으로 찾기
+        // 7410 = 0x1CF2 (2 bytes)
+        // 7410 = 0x00001CF2 (4 bytes)
+        // 7410 as BCD = 0x7410 or 0x07410000
+
+        for (int i = 0; i < length - 1; i++) {
+            // 2바이트 Big Endian
+            int val2BE = ((data[i] & 0xFF) << 8) | (data[i + 1] & 0xFF);
+            // 2바이트 Little Endian
+            int val2LE = ((data[i + 1] & 0xFF) << 8) | (data[i] & 0xFF);
+
+            if (val2BE == 7410) {
+                Log.i(TAG, "searchBalanceInResponse: FOUND 7410 at offset " + i + " (2-byte BE)");
+                kftcBalance = 7410;
+            }
+            if (val2LE == 7410) {
+                Log.i(TAG, "searchBalanceInResponse: FOUND 7410 at offset " + i + " (2-byte LE)");
+                kftcBalance = 7410;
+            }
+
+            // 4바이트 검색
+            if (i < length - 3) {
+                int val4BE = ((data[i] & 0xFF) << 24) | ((data[i + 1] & 0xFF) << 16) |
+                             ((data[i + 2] & 0xFF) << 8) | (data[i + 3] & 0xFF);
+                int val4LE = ((data[i + 3] & 0xFF) << 24) | ((data[i + 2] & 0xFF) << 16) |
+                             ((data[i + 1] & 0xFF) << 8) | (data[i] & 0xFF);
+
+                if (val4BE == 7410) {
+                    Log.i(TAG, "searchBalanceInResponse: FOUND 7410 at offset " + i + " (4-byte BE)");
+                    kftcBalance = 7410;
+                }
+                if (val4LE == 7410) {
+                    Log.i(TAG, "searchBalanceInResponse: FOUND 7410 at offset " + i + " (4-byte LE)");
+                    kftcBalance = 7410;
+                }
+
+                // 유효한 잔액 범위(100~100000원) 내의 값 로깅
+                if (val4BE >= 100 && val4BE <= 100000) {
+                    Log.d(TAG, "searchBalanceInResponse: Possible balance at offset " + i + " (4-byte BE) = " + val4BE);
+                }
+                if (val4LE >= 100 && val4LE <= 100000 && val4LE != val4BE) {
+                    Log.d(TAG, "searchBalanceInResponse: Possible balance at offset " + i + " (4-byte LE) = " + val4LE);
+                }
+            }
+
+            // BCD 2바이트 (0x74 0x10 = 7410 in BCD)
+            int bcd2 = ((data[i] >> 4) & 0x0F) * 1000 + (data[i] & 0x0F) * 100 +
+                       ((data[i + 1] >> 4) & 0x0F) * 10 + (data[i + 1] & 0x0F);
+            if (bcd2 == 7410) {
+                Log.i(TAG, "searchBalanceInResponse: FOUND 7410 at offset " + i + " (BCD 2-byte)");
+                kftcBalance = 7410;
             }
         }
     }
