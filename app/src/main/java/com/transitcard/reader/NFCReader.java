@@ -526,7 +526,7 @@ public class NFCReader {
                                          (balResp[3] & 0xFF);
                             Log.i(TAG, "tryKftcCommands: SUCCESS! Balance = " + kftcBalance + "원");
 
-                            // 카드번호 읽기 시도 (SFI 1, Record 1)
+                            // 카드번호 읽기 시도 (여러 방법)
                             tryReadCardNumber(isoDep);
                             return;
                         }
@@ -564,13 +564,13 @@ public class NFCReader {
     }
 
     /**
-     * 카드번호 읽기 시도 (SFI records에서)
+     * 카드번호 읽기 시도 (여러 방법으로)
      */
     private void tryReadCardNumber(IsoDep isoDep) {
         if (kftcCardNumber != null) return;
 
+        // 방법 1: SFI 1, Record 1 읽기
         try {
-            // SFI 1, Record 1 읽기 (카드번호가 자주 저장되는 위치)
             byte[] cmd = {0x00, (byte)0xB2, 0x01, 0x0C, 0x00};
             byte[] response = isoDep.transceive(cmd);
 
@@ -579,12 +579,75 @@ public class NFCReader {
                 int sw2 = response[response.length - 1] & 0xFF;
 
                 if (sw1 == 0x90 && sw2 == 0x00) {
-                    Log.d(TAG, "tryReadCardNumber: Record response = " + bytesToHex(response));
+                    Log.d(TAG, "tryReadCardNumber: SFI1 Rec1 = " + bytesToHex(response));
                     extractCardNumberFromTlv(response, response.length - 2);
+                    if (kftcCardNumber != null) return;
                 }
             }
         } catch (Exception e) {
-            Log.d(TAG, "tryReadCardNumber: Failed: " + e.getMessage());
+            Log.d(TAG, "tryReadCardNumber: SFI1 failed: " + e.getMessage());
+        }
+
+        // 방법 2: SFI 2, Record 1 읽기
+        try {
+            byte[] cmd = {0x00, (byte)0xB2, 0x01, 0x14, 0x00};
+            byte[] response = isoDep.transceive(cmd);
+
+            if (response != null && response.length > 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.d(TAG, "tryReadCardNumber: SFI2 Rec1 = " + bytesToHex(response));
+                    extractCardNumberFromTlv(response, response.length - 2);
+                    if (kftcCardNumber != null) return;
+                }
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "tryReadCardNumber: SFI2 failed: " + e.getMessage());
+        }
+
+        // 방법 3: GET DATA 명령 (90 4A)
+        try {
+            byte[] cmd = {(byte)0x90, 0x4A, 0x00, 0x00, 0x10};
+            byte[] response = isoDep.transceive(cmd);
+
+            if (response != null && response.length > 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+
+                if (sw1 == 0x90 && sw2 == 0x00 && response.length >= 10) {
+                    Log.d(TAG, "tryReadCardNumber: GET DATA = " + bytesToHex(response));
+                    // 응답에서 직접 카드번호 추출 (BCD 인코딩)
+                    String cardNum = formatCardNumber(response, 0, 8);
+                    if (cardNum != null && cardNum.length() >= 16) {
+                        kftcCardNumber = cardNum;
+                        Log.i(TAG, "tryReadCardNumber: Found from GET DATA = " + kftcCardNumber);
+                        return;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "tryReadCardNumber: GET DATA failed: " + e.getMessage());
+        }
+
+        // 방법 4: GET DATA 명령 (00 CA)
+        try {
+            byte[] cmd = {0x00, (byte)0xCA, 0x00, 0x00, 0x00};
+            byte[] response = isoDep.transceive(cmd);
+
+            if (response != null && response.length > 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    Log.d(TAG, "tryReadCardNumber: GET DATA (00CA) = " + bytesToHex(response));
+                    extractCardNumberFromTlv(response, response.length - 2);
+                    if (kftcCardNumber != null) return;
+                }
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "tryReadCardNumber: GET DATA (00CA) failed: " + e.getMessage());
         }
     }
 
@@ -592,7 +655,7 @@ public class NFCReader {
      * FCI 응답에서 카드번호 추출
      */
     private void extractCardNumberFromFci(byte[] data, int length) {
-        // Tag 5A (PAN) 또는 Tag 57 (Track 2) 검색
+        // 먼저 전체 데이터를 스캔해서 카드번호 TLV 찾기
         for (int i = 0; i < length - 2; i++) {
             int tag = data[i] & 0xFF;
 
@@ -601,7 +664,7 @@ public class NFCReader {
                 int len = data[i + 1] & 0xFF;
                 if (i + 2 + len <= length && len >= 8) {
                     kftcCardNumber = formatCardNumber(data, i + 2, len);
-                    Log.i(TAG, "extractCardNumberFromFci: Found PAN = " + kftcCardNumber);
+                    Log.i(TAG, "extractCardNumberFromFci: Found PAN (5A) = " + kftcCardNumber);
                     return;
                 }
             }
@@ -610,11 +673,25 @@ public class NFCReader {
             if (tag == 0x57 && i + 1 < length) {
                 int len = data[i + 1] & 0xFF;
                 if (i + 2 + len <= length && len >= 8) {
-                    // Track 2에서 PAN 부분만 추출 (separator 'D' 또는 '=' 전까지)
                     kftcCardNumber = formatCardNumberFromTrack2(data, i + 2, len);
-                    Log.i(TAG, "extractCardNumberFromFci: Found Track2 PAN = " + kftcCardNumber);
+                    Log.i(TAG, "extractCardNumberFromFci: Found Track2 (57) = " + kftcCardNumber);
                     return;
                 }
+            }
+
+            // Tag 9F6B (Track 2 Data)
+            if (tag == 0x9F && i + 1 < length && (data[i + 1] & 0xFF) == 0x6B && i + 2 < length) {
+                int len = data[i + 2] & 0xFF;
+                if (i + 3 + len <= length && len >= 8) {
+                    kftcCardNumber = formatCardNumberFromTrack2(data, i + 3, len);
+                    Log.i(TAG, "extractCardNumberFromFci: Found Track2 (9F6B) = " + kftcCardNumber);
+                    return;
+                }
+            }
+
+            // 2-byte tags (9F로 시작하는 태그 처리)
+            if (tag == 0x9F && i + 2 < length) {
+                i++; // Skip second byte of tag
             }
         }
     }
@@ -623,7 +700,7 @@ public class NFCReader {
      * TLV 데이터에서 카드번호 추출
      */
     private void extractCardNumberFromTlv(byte[] data, int length) {
-        extractCardNumberFromFci(data, length); // 동일한 로직 사용
+        extractCardNumberFromFci(data, length);
     }
 
     /**
@@ -632,7 +709,7 @@ public class NFCReader {
      */
     private String formatCardNumber(byte[] data, int offset, int len) {
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < len; i++) {
+        for (int i = 0; i < len && offset + i < data.length; i++) {
             int high = (data[offset + i] >> 4) & 0x0F;
             int low = data[offset + i] & 0x0F;
             if (high <= 9) sb.append(high);
@@ -645,7 +722,7 @@ public class NFCReader {
             return raw.substring(0, 4) + " " + raw.substring(4, 8) + " " +
                    raw.substring(8, 12) + " " + raw.substring(12, 16);
         }
-        return raw;
+        return raw.length() > 0 ? raw : null;
     }
 
     /**
@@ -653,7 +730,7 @@ public class NFCReader {
      */
     private String formatCardNumberFromTrack2(byte[] data, int offset, int len) {
         StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < len; i++) {
+        for (int i = 0; i < len && offset + i < data.length; i++) {
             int high = (data[offset + i] >> 4) & 0x0F;
             int low = data[offset + i] & 0x0F;
             // 'D'(0x0D) 또는 'F' 패딩에서 중지
@@ -668,7 +745,7 @@ public class NFCReader {
             return raw.substring(0, 4) + " " + raw.substring(4, 8) + " " +
                    raw.substring(8, 12) + " " + raw.substring(12, 16);
         }
-        return raw;
+        return raw.length() > 0 ? raw : null;
     }
 
     public String getKftcCardNumber() {

@@ -3,7 +3,6 @@ package com.transitcard.reader;
 import android.nfc.tech.IsoDep;
 import android.util.Log;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -13,28 +12,33 @@ public class EZLParser implements CardParser {
     @Override
     public TransitCardData parse(IsoDep isoDep, byte[] cardId) {
         Log.d(TAG, "=== EZLParser.parse: Starting EZL card parsing ===");
-        Log.d(TAG, "parse: Card ID = " + bytesToHex(cardId));
         try {
+            // Select Secondary AID first (required for EZL)
+            if (!selectSecondaryAid(isoDep)) {
+                Log.w(TAG, "parse: Secondary AID selection failed");
+            }
+
+            // Read card number
+            String cardNumber = readCardNumber(isoDep);
+            if (cardNumber == null || cardNumber.isEmpty()) {
+                cardNumber = bytesToHex(cardId);
+            }
+
             // Read balance
-            Log.d(TAG, "parse: Reading balance...");
             int balance = readBalance(isoDep);
-            Log.d(TAG, "parse: Balance read = " + balance);
 
             // Read transaction history
-            Log.d(TAG, "parse: Reading transaction history...");
             List<Transaction> transactions = readTransactionHistory(isoDep);
-            Log.d(TAG, "parse: Transactions read = " + transactions.size());
 
-            Log.i(TAG, "parse: SUCCESS - EZL card parsed, balance=" + balance);
+            Log.i(TAG, "parse: SUCCESS - balance=" + balance + ", cardNumber=" + cardNumber);
             return new TransitCardData(
                     CardType.EZL,
-                    bytesToHex(cardId),
+                    cardNumber,
                     balance,
                     transactions
             );
         } catch (Exception e) {
             Log.e(TAG, "parse: Error parsing EZL card", e);
-            // Return basic info even if detailed parsing fails
             return new TransitCardData(
                     CardType.EZL,
                     bytesToHex(cardId),
@@ -44,130 +48,426 @@ public class EZLParser implements CardParser {
         }
     }
 
-    private int readBalance(IsoDep isoDep) {
+    /**
+     * Secondary AID 선택 (D4100000140001)
+     */
+    private boolean selectSecondaryAid(IsoDep isoDep) {
         try {
-            Log.d(TAG, "readBalance: Starting EZL balance read...");
-
-            // EZL 카드는 Secondary AID 선택 후 T-money 스타일 명령어 사용
-            // Step 1: Select Secondary AID (D4100000140001)
             byte[] selectCmd = new byte[]{
                     0x00, (byte)0xA4, 0x04, 0x00, 0x07,
                     (byte)0xD4, 0x10, 0x00, 0x00, 0x14, 0x00, 0x01,
                     0x00
             };
-            Log.d(TAG, "readBalance: Selecting Secondary AID = " + bytesToHex(selectCmd));
-            byte[] selectResp = isoDep.transceive(selectCmd);
-            Log.d(TAG, "readBalance: Secondary AID response = " + bytesToHex(selectResp));
+            byte[] response = isoDep.transceive(selectCmd);
+            Log.d(TAG, "selectSecondaryAid: response = " + bytesToHex(response));
 
-            if (selectResp != null && selectResp.length >= 2) {
-                int sw1 = selectResp[selectResp.length - 2] & 0xFF;
-                int sw2 = selectResp[selectResp.length - 1] & 0xFF;
+            if (response != null && response.length >= 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+                return sw1 == 0x90 && sw2 == 0x00;
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "selectSecondaryAid: Failed - " + e.getMessage());
+        }
+        return false;
+    }
+
+    /**
+     * 카드번호 읽기
+     */
+    private String readCardNumber(IsoDep isoDep) {
+        try {
+            // SFI 1, Record 1 읽기
+            byte[] cmd = {0x00, (byte)0xB2, 0x01, 0x0C, 0x00};
+            byte[] response = isoDep.transceive(cmd);
+            Log.d(TAG, "readCardNumber: SFI1 Rec1 = " + bytesToHex(response));
+
+            if (response != null && response.length > 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
 
                 if (sw1 == 0x90 && sw2 == 0x00) {
-                    Log.d(TAG, "readBalance: Secondary AID selected, reading balance...");
-
-                    // Step 2: T-money style balance command (90 4C 00 00 04)
-                    byte[] balanceCmd = new byte[]{
-                            (byte) 0x90, (byte) 0x4C, (byte) 0x00, (byte) 0x00,
-                            (byte) 0x04
-                    };
-                    Log.d(TAG, "readBalance: Sending balance command = " + bytesToHex(balanceCmd));
-                    byte[] response = isoDep.transceive(balanceCmd);
-                    Log.d(TAG, "readBalance: Balance response = " + bytesToHex(response));
-
-                    if (response.length >= 6) {
-                        int bsw1 = response[response.length - 2] & 0xFF;
-                        int bsw2 = response[response.length - 1] & 0xFF;
-                        Log.d(TAG, "readBalance: Balance SW = " + String.format("%02X%02X", bsw1, bsw2));
-
-                        if (bsw1 == 0x90 && bsw2 == 0x00) {
-                            // Balance is stored in first 4 bytes (big-endian)
-                            int balance = ((response[0] & 0xFF) << 24) |
-                                         ((response[1] & 0xFF) << 16) |
-                                         ((response[2] & 0xFF) << 8) |
-                                         (response[3] & 0xFF);
-                            Log.i(TAG, "readBalance: SUCCESS - Balance = " + balance + "원");
-                            return balance;
-                        } else {
-                            Log.e(TAG, "readBalance: Balance command failed with SW: " + String.format("%02X%02X", bsw1, bsw2));
-                        }
-                    } else {
-                        Log.w(TAG, "readBalance: Balance response too short: " + response.length);
+                    String cardNum = extractCardNumberFromTlv(response, response.length - 2);
+                    if (cardNum != null) {
+                        Log.i(TAG, "readCardNumber: Found = " + cardNum);
+                        return cardNum;
                     }
-                } else {
-                    Log.e(TAG, "readBalance: Secondary AID selection failed with SW: " + String.format("%02X%02X", sw1, sw2));
+                }
+            }
+
+            // SFI 2 시도
+            byte[] cmd2 = {0x00, (byte)0xB2, 0x01, 0x14, 0x00};
+            response = isoDep.transceive(cmd2);
+            Log.d(TAG, "readCardNumber: SFI2 Rec1 = " + bytesToHex(response));
+
+            if (response != null && response.length > 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    String cardNum = extractCardNumberFromTlv(response, response.length - 2);
+                    if (cardNum != null) {
+                        Log.i(TAG, "readCardNumber: Found from SFI2 = " + cardNum);
+                        return cardNum;
+                    }
+                }
+            }
+
+            // GET DATA 시도 (90 4A)
+            byte[] getDataCmd = {(byte)0x90, 0x4A, 0x00, 0x00, 0x10};
+            response = isoDep.transceive(getDataCmd);
+            Log.d(TAG, "readCardNumber: GET DATA = " + bytesToHex(response));
+
+            if (response != null && response.length > 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+
+                if (sw1 == 0x90 && sw2 == 0x00 && response.length >= 10) {
+                    String cardNum = formatBcdCardNumber(response, 0, 8);
+                    if (cardNum != null && cardNum.length() >= 16) {
+                        Log.i(TAG, "readCardNumber: Found from GET DATA = " + cardNum);
+                        return cardNum;
+                    }
+                }
+            }
+
+        } catch (Exception e) {
+            Log.d(TAG, "readCardNumber: Failed - " + e.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * TLV에서 카드번호 추출
+     */
+    private String extractCardNumberFromTlv(byte[] data, int length) {
+        for (int i = 0; i < length - 2; i++) {
+            int tag = data[i] & 0xFF;
+
+            // Tag 5A (Application PAN)
+            if (tag == 0x5A && i + 1 < length) {
+                int len = data[i + 1] & 0xFF;
+                if (i + 2 + len <= length && len >= 8) {
+                    return formatBcdCardNumber(data, i + 2, len);
+                }
+            }
+
+            // Tag 57 (Track 2 Equivalent Data)
+            if (tag == 0x57 && i + 1 < length) {
+                int len = data[i + 1] & 0xFF;
+                if (i + 2 + len <= length && len >= 8) {
+                    return formatTrack2CardNumber(data, i + 2, len);
+                }
+            }
+
+            // Tag 9F6B
+            if (tag == 0x9F && i + 1 < length && (data[i + 1] & 0xFF) == 0x6B && i + 2 < length) {
+                int len = data[i + 2] & 0xFF;
+                if (i + 3 + len <= length && len >= 8) {
+                    return formatTrack2CardNumber(data, i + 3, len);
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * BCD 인코딩된 카드번호를 "XXXX XXXX XXXX XXXX" 형식으로 변환
+     */
+    private String formatBcdCardNumber(byte[] data, int offset, int len) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < len && offset + i < data.length; i++) {
+            int high = (data[offset + i] >> 4) & 0x0F;
+            int low = data[offset + i] & 0x0F;
+            if (high <= 9) sb.append(high);
+            if (low <= 9) sb.append(low);
+        }
+
+        String raw = sb.toString();
+        if (raw.length() >= 16) {
+            return raw.substring(0, 4) + " " + raw.substring(4, 8) + " " +
+                   raw.substring(8, 12) + " " + raw.substring(12, 16);
+        }
+        return raw.length() > 0 ? raw : null;
+    }
+
+    /**
+     * Track 2 데이터에서 카드번호 추출
+     */
+    private String formatTrack2CardNumber(byte[] data, int offset, int len) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < len && offset + i < data.length; i++) {
+            int high = (data[offset + i] >> 4) & 0x0F;
+            int low = data[offset + i] & 0x0F;
+            if (high == 0x0D || high == 0x0F) break;
+            if (high <= 9) sb.append(high);
+            if (low == 0x0D || low == 0x0F) break;
+            if (low <= 9) sb.append(low);
+        }
+
+        String raw = sb.toString();
+        if (raw.length() >= 16) {
+            return raw.substring(0, 4) + " " + raw.substring(4, 8) + " " +
+                   raw.substring(8, 12) + " " + raw.substring(12, 16);
+        }
+        return raw.length() > 0 ? raw : null;
+    }
+
+    private int readBalance(IsoDep isoDep) {
+        try {
+            // T-money style balance command (90 4C 00 00 04)
+            byte[] balanceCmd = new byte[]{
+                    (byte) 0x90, (byte) 0x4C, (byte) 0x00, (byte) 0x00, (byte) 0x04
+            };
+            byte[] response = isoDep.transceive(balanceCmd);
+            Log.d(TAG, "readBalance: response = " + bytesToHex(response));
+
+            if (response.length >= 6) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    int balance = ((response[0] & 0xFF) << 24) |
+                                 ((response[1] & 0xFF) << 16) |
+                                 ((response[2] & 0xFF) << 8) |
+                                 (response[3] & 0xFF);
+                    Log.i(TAG, "readBalance: SUCCESS = " + balance + "원");
+                    return balance;
                 }
             }
             return 0;
         } catch (Exception e) {
-            Log.e(TAG, "readBalance: Error reading balance", e);
+            Log.e(TAG, "readBalance: Error", e);
             return 0;
         }
     }
 
+    /**
+     * 거래내역 읽기
+     */
     private List<Transaction> readTransactionHistory(IsoDep isoDep) {
-        Log.d(TAG, "readTransactionHistory: Starting to read transactions");
         List<Transaction> transactions = new ArrayList<>();
 
         try {
-            // Read transaction records (up to 20 records)
-            for (int recordNum = 0; recordNum < 20; recordNum++) {
-                byte[] command = new byte[]{
-                        (byte) 0x90, (byte) 0xB2, // CLA, INS (Read Record)
-                        (byte) recordNum, (byte) 0x00, // P1 (record number), P2
-                        (byte) 0x10                  // Le (16 bytes)
-                };
+            // 1. 거래내역 개수 조회 (90 4E 00 01 00)
+            byte[] countCmd = {(byte)0x90, 0x4E, 0x00, 0x01, 0x00};
+            byte[] countResp = isoDep.transceive(countCmd);
+            Log.d(TAG, "readTransactionHistory: count = " + bytesToHex(countResp));
 
-                Log.d(TAG, "readTransactionHistory: Record " + recordNum + " command = " + bytesToHex(command));
-                byte[] response = isoDep.transceive(command);
-                Log.d(TAG, "readTransactionHistory: Record " + recordNum + " response = " + bytesToHex(response) + " (length=" + response.length + ")");
+            int recordCount = 10;
+            if (countResp != null && countResp.length >= 3) {
+                int sw1 = countResp[countResp.length - 2] & 0xFF;
+                int sw2 = countResp[countResp.length - 1] & 0xFF;
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    recordCount = countResp[0] & 0xFF;
+                    Log.d(TAG, "readTransactionHistory: recordCount = " + recordCount);
+                }
+            }
 
-                if (response.length >= 18) { // 16 bytes data + 2 bytes SW
-                    int sw1 = response[response.length - 2] & 0xFF;
-                    int sw2 = response[response.length - 1] & 0xFF;
-                    Log.d(TAG, "readTransactionHistory: Record " + recordNum + " SW = " + String.format("%02X%02X", sw1, sw2));
+            // 2. 각 거래내역 레코드 읽기 (90 4E 00 02 xx)
+            for (int i = 0; i < Math.min(recordCount, 10); i++) {
+                try {
+                    byte[] readCmd = {(byte)0x90, 0x4E, 0x00, 0x02, (byte)i};
+                    byte[] response = isoDep.transceive(readCmd);
+                    Log.d(TAG, "readTransactionHistory: record " + i + " = " + bytesToHex(response));
 
-                    if (sw1 == 0x90 && sw2 == 0x00) {
-                        Transaction transaction = parseTransactionRecord(response);
-                        if (transaction != null) {
-                            transactions.add(transaction);
-                            Log.d(TAG, "readTransactionHistory: Record " + recordNum + " parsed successfully");
+                    if (response != null && response.length >= 16) {
+                        int sw1 = response[response.length - 2] & 0xFF;
+                        int sw2 = response[response.length - 1] & 0xFF;
+
+                        if (sw1 == 0x90 && sw2 == 0x00) {
+                            Transaction tx = parseTransactionRecord(response);
+                            if (tx != null) {
+                                transactions.add(tx);
+                            }
                         }
-                    } else {
-                        Log.d(TAG, "readTransactionHistory: No more records (SW != 9000)");
-                        break; // No more records
                     }
-                } else {
-                    Log.d(TAG, "readTransactionHistory: Response too short, stopping");
+                } catch (Exception e) {
+                    Log.d(TAG, "readTransactionHistory: record " + i + " failed");
+                }
+            }
+
+            // 3. 90 4E가 안되면 READ RECORD로 시도
+            if (transactions.isEmpty()) {
+                Log.d(TAG, "readTransactionHistory: Trying READ RECORD method...");
+                transactions = readTransactionHistoryByRecord(isoDep);
+            }
+
+        } catch (Exception e) {
+            Log.e(TAG, "readTransactionHistory: Error", e);
+        }
+
+        Log.i(TAG, "readTransactionHistory: Found " + transactions.size() + " transactions");
+        return transactions;
+    }
+
+    /**
+     * READ RECORD로 거래내역 읽기 (대체 방법)
+     */
+    private List<Transaction> readTransactionHistoryByRecord(IsoDep isoDep) {
+        List<Transaction> transactions = new ArrayList<>();
+        int[] sfis = {7, 8, 9};
+
+        for (int sfi : sfis) {
+            int p2 = (sfi << 3) | 0x04;
+            for (int record = 1; record <= 10; record++) {
+                try {
+                    byte[] cmd = {0x00, (byte)0xB2, (byte)record, (byte)p2, 0x00};
+                    byte[] response = isoDep.transceive(cmd);
+
+                    if (response != null && response.length > 2) {
+                        int sw1 = response[response.length - 2] & 0xFF;
+                        int sw2 = response[response.length - 1] & 0xFF;
+
+                        if (sw1 == 0x90 && sw2 == 0x00 && response.length >= 16) {
+                            Log.d(TAG, "readTransactionHistoryByRecord: SFI" + sfi + " Rec" + record + " = " + bytesToHex(response));
+                            Transaction tx = parseTransactionRecordFromSfi(response);
+                            if (tx != null) {
+                                transactions.add(tx);
+                            }
+                        } else if (sw1 == 0x6A && sw2 == 0x83) {
+                            break;
+                        }
+                    }
+                } catch (Exception e) {
                     break;
                 }
             }
-        } catch (Exception e) {
-            Log.e(TAG, "readTransactionHistory: Error reading transaction history", e);
+            if (!transactions.isEmpty()) break;
         }
 
-        Log.d(TAG, "readTransactionHistory: Total transactions found = " + transactions.size());
-        // Return last 10 transactions
-        return transactions.size() > 10 ? transactions.subList(0, 10) : transactions;
+        return transactions;
     }
 
+    /**
+     * 거래내역 레코드 파싱
+     */
     private Transaction parseTransactionRecord(byte[] data) {
         try {
-            // Parse transaction data (this is simplified)
-            // Real format would need proper decoding based on EZL specifications
-            int amount = ByteBuffer.wrap(data, 4, 4).getInt();
-            int balanceAfter = ByteBuffer.wrap(data, 8, 4).getInt();
+            if (data.length < 14) return null;
 
-            return new Transaction(
-                    "2024-01-01", // Would parse from actual data
-                    "이즐 사용처",     // Would parse from actual data
-                    amount,
-                    balanceAfter,
-                    amount < 0 ? TransactionType.USE : TransactionType.CHARGE
-            );
+            int txType = data[0] & 0xFF;
+            TransactionType transactionType;
+            String typeDesc;
+            switch (txType) {
+                case 0x01:
+                    transactionType = TransactionType.USE;
+                    typeDesc = "승차";
+                    break;
+                case 0x02:
+                    transactionType = TransactionType.USE;
+                    typeDesc = "하차";
+                    break;
+                case 0x03:
+                    transactionType = TransactionType.USE;
+                    typeDesc = "환승";
+                    break;
+                case 0x04:
+                case 0x05:
+                    transactionType = TransactionType.CHARGE;
+                    typeDesc = "충전";
+                    break;
+                default:
+                    transactionType = TransactionType.USE;
+                    typeDesc = "사용";
+            }
+
+            String date = parseBcdDate(data, 1);
+
+            int amount = ((data[5] & 0xFF) << 24) |
+                        ((data[6] & 0xFF) << 16) |
+                        ((data[7] & 0xFF) << 8) |
+                        (data[8] & 0xFF);
+
+            int balanceAfter = ((data[9] & 0xFF) << 24) |
+                              ((data[10] & 0xFF) << 16) |
+                              ((data[11] & 0xFF) << 8) |
+                              (data[12] & 0xFF);
+
+            if (amount == 0 && balanceAfter == 0) return null;
+            if (amount > 1000000 || balanceAfter > 1000000) return null;
+
+            Log.d(TAG, "parseTransactionRecord: type=" + typeDesc + ", date=" + date +
+                      ", amount=" + amount + ", balance=" + balanceAfter);
+
+            return new Transaction(date, typeDesc, amount, balanceAfter, transactionType);
         } catch (Exception e) {
-            Log.e(TAG, "Error parsing transaction record", e);
+            Log.e(TAG, "parseTransactionRecord: Error", e);
             return null;
+        }
+    }
+
+    /**
+     * SFI READ RECORD에서 거래내역 파싱
+     */
+    private Transaction parseTransactionRecordFromSfi(byte[] data) {
+        try {
+            if (data.length < 14) return null;
+
+            boolean allZero = true;
+            for (int i = 0; i < Math.min(12, data.length - 2); i++) {
+                if (data[i] != 0) {
+                    allZero = false;
+                    break;
+                }
+            }
+            if (allZero) return null;
+
+            int txType = data[0] & 0xFF;
+            TransactionType transactionType = (txType == 0x04 || txType == 0x05) ?
+                    TransactionType.CHARGE : TransactionType.USE;
+            String typeDesc = (transactionType == TransactionType.CHARGE) ? "충전" : "사용";
+
+            String date = parseBcdDate(data, 1);
+            if (date.equals("00/00/00 00:00")) {
+                date = parseBcdDate(data, 0);
+            }
+
+            int amount = 0;
+            int balanceAfter = 0;
+
+            if (data.length >= 12) {
+                amount = ((data[4] & 0xFF) << 24) |
+                        ((data[5] & 0xFF) << 16) |
+                        ((data[6] & 0xFF) << 8) |
+                        (data[7] & 0xFF);
+                balanceAfter = ((data[8] & 0xFF) << 24) |
+                              ((data[9] & 0xFF) << 16) |
+                              ((data[10] & 0xFF) << 8) |
+                              (data[11] & 0xFF);
+            }
+
+            if (amount > 500000) amount = 0;
+            if (balanceAfter > 500000) balanceAfter = 0;
+
+            if (amount == 0 && balanceAfter == 0) return null;
+
+            return new Transaction(date, typeDesc, amount, balanceAfter, transactionType);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * BCD 인코딩된 날짜 파싱
+     */
+    private String parseBcdDate(byte[] data, int offset) {
+        try {
+            if (offset + 5 > data.length) return "00/00/00 00:00";
+
+            int yy = ((data[offset] >> 4) & 0x0F) * 10 + (data[offset] & 0x0F);
+            int mm = ((data[offset + 1] >> 4) & 0x0F) * 10 + (data[offset + 1] & 0x0F);
+            int dd = ((data[offset + 2] >> 4) & 0x0F) * 10 + (data[offset + 2] & 0x0F);
+            int hh = ((data[offset + 3] >> 4) & 0x0F) * 10 + (data[offset + 3] & 0x0F);
+            int min = ((data[offset + 4] >> 4) & 0x0F) * 10 + (data[offset + 4] & 0x0F);
+
+            if (mm < 1 || mm > 12 || dd < 1 || dd > 31 || hh > 23 || min > 59) {
+                return "00/00/00 00:00";
+            }
+
+            return String.format("%02d/%02d/%02d %02d:%02d", yy, mm, dd, hh, min);
+        } catch (Exception e) {
+            return "00/00/00 00:00";
         }
     }
 
