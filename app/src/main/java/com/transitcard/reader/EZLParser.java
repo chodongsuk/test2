@@ -14,18 +14,16 @@ public class EZLParser implements CardParser {
         Log.d(TAG, "=== EZLParser.parse: Starting EZL card parsing ===");
         try {
             // Select Secondary AID first (required for EZL)
-            if (!selectSecondaryAid(isoDep)) {
-                Log.w(TAG, "parse: Secondary AID selection failed");
-            }
+            selectSecondaryAid(isoDep);
+
+            // Read balance first
+            int balance = readBalance(isoDep);
 
             // Read card number
             String cardNumber = readCardNumber(isoDep);
             if (cardNumber == null || cardNumber.isEmpty()) {
                 cardNumber = bytesToHex(cardId);
             }
-
-            // Read balance
-            int balance = readBalance(isoDep);
 
             // Read transaction history
             List<Transaction> transactions = readTransactionHistory(isoDep);
@@ -73,107 +71,205 @@ public class EZLParser implements CardParser {
     }
 
     /**
-     * 카드번호 읽기
+     * 카드번호 읽기 - 여러 방법 시도
      */
     private String readCardNumber(IsoDep isoDep) {
+        Log.d(TAG, "=== readCardNumber: Starting ===");
+
+        // 방법 1: GET DATA 명령 (90 4A)
         try {
-            // SFI 1, Record 1 읽기
-            byte[] cmd = {0x00, (byte)0xB2, 0x01, 0x0C, 0x00};
+            byte[] cmd = {(byte)0x90, 0x4A, 0x00, 0x00, 0x00};
             byte[] response = isoDep.transceive(cmd);
-            Log.d(TAG, "readCardNumber: SFI1 Rec1 = " + bytesToHex(response));
+            Log.d(TAG, "readCardNumber: GET DATA (90 4A) = " + bytesToHex(response));
 
             if (response != null && response.length > 2) {
                 int sw1 = response[response.length - 2] & 0xFF;
                 int sw2 = response[response.length - 1] & 0xFF;
 
                 if (sw1 == 0x90 && sw2 == 0x00) {
-                    String cardNum = extractCardNumberFromTlv(response, response.length - 2);
+                    String cardNum = findCardNumberInData(response, response.length - 2);
                     if (cardNum != null) {
-                        Log.i(TAG, "readCardNumber: Found = " + cardNum);
+                        Log.i(TAG, "readCardNumber: Found from 90 4A = " + cardNum);
                         return cardNum;
+                    }
+                } else if (sw1 == 0x6C) {
+                    byte[] retryCmd = {(byte)0x90, 0x4A, 0x00, 0x00, (byte)sw2};
+                    response = isoDep.transceive(retryCmd);
+                    Log.d(TAG, "readCardNumber: GET DATA retry = " + bytesToHex(response));
+                    if (response != null && response.length > 2) {
+                        String cardNum = findCardNumberInData(response, response.length - 2);
+                        if (cardNum != null) {
+                            Log.i(TAG, "readCardNumber: Found from 90 4A retry = " + cardNum);
+                            return cardNum;
+                        }
                     }
                 }
             }
-
-            // SFI 2 시도
-            byte[] cmd2 = {0x00, (byte)0xB2, 0x01, 0x14, 0x00};
-            response = isoDep.transceive(cmd2);
-            Log.d(TAG, "readCardNumber: SFI2 Rec1 = " + bytesToHex(response));
-
-            if (response != null && response.length > 2) {
-                int sw1 = response[response.length - 2] & 0xFF;
-                int sw2 = response[response.length - 1] & 0xFF;
-
-                if (sw1 == 0x90 && sw2 == 0x00) {
-                    String cardNum = extractCardNumberFromTlv(response, response.length - 2);
-                    if (cardNum != null) {
-                        Log.i(TAG, "readCardNumber: Found from SFI2 = " + cardNum);
-                        return cardNum;
-                    }
-                }
-            }
-
-            // GET DATA 시도 (90 4A)
-            byte[] getDataCmd = {(byte)0x90, 0x4A, 0x00, 0x00, 0x10};
-            response = isoDep.transceive(getDataCmd);
-            Log.d(TAG, "readCardNumber: GET DATA = " + bytesToHex(response));
-
-            if (response != null && response.length > 2) {
-                int sw1 = response[response.length - 2] & 0xFF;
-                int sw2 = response[response.length - 1] & 0xFF;
-
-                if (sw1 == 0x90 && sw2 == 0x00 && response.length >= 10) {
-                    String cardNum = formatBcdCardNumber(response, 0, 8);
-                    if (cardNum != null && cardNum.length() >= 16) {
-                        Log.i(TAG, "readCardNumber: Found from GET DATA = " + cardNum);
-                        return cardNum;
-                    }
-                }
-            }
-
         } catch (Exception e) {
-            Log.d(TAG, "readCardNumber: Failed - " + e.getMessage());
+            Log.d(TAG, "readCardNumber: 90 4A failed - " + e.getMessage());
         }
+
+        // 방법 2: 여러 SFI의 Record 읽기
+        int[] sfis = {1, 2, 3, 4, 5, 6};
+        for (int sfi : sfis) {
+            int p2 = (sfi << 3) | 0x04;
+            for (int record = 1; record <= 3; record++) {
+                try {
+                    byte[] cmd = {0x00, (byte)0xB2, (byte)record, (byte)p2, 0x00};
+                    byte[] response = isoDep.transceive(cmd);
+
+                    if (response != null && response.length > 2) {
+                        int sw1 = response[response.length - 2] & 0xFF;
+                        int sw2 = response[response.length - 1] & 0xFF;
+
+                        if (sw1 == 0x90 && sw2 == 0x00) {
+                            Log.d(TAG, "readCardNumber: SFI" + sfi + " Rec" + record + " = " + bytesToHex(response));
+                            String cardNum = findCardNumberInData(response, response.length - 2);
+                            if (cardNum != null) {
+                                Log.i(TAG, "readCardNumber: Found from SFI" + sfi + " = " + cardNum);
+                                return cardNum;
+                            }
+                        } else if (sw1 == 0x6C) {
+                            byte[] retryCmd = {0x00, (byte)0xB2, (byte)record, (byte)p2, (byte)sw2};
+                            response = isoDep.transceive(retryCmd);
+                            if (response != null && response.length > 2) {
+                                Log.d(TAG, "readCardNumber: SFI" + sfi + " Rec" + record + " retry = " + bytesToHex(response));
+                                String cardNum = findCardNumberInData(response, response.length - 2);
+                                if (cardNum != null) {
+                                    Log.i(TAG, "readCardNumber: Found from SFI" + sfi + " retry = " + cardNum);
+                                    return cardNum;
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    // 다음 SFI 시도
+                }
+            }
+        }
+
+        // 방법 3: READ BINARY
+        try {
+            byte[] cmd = {0x00, (byte)0xB0, 0x00, 0x00, 0x20};
+            byte[] response = isoDep.transceive(cmd);
+            Log.d(TAG, "readCardNumber: READ BINARY = " + bytesToHex(response));
+
+            if (response != null && response.length > 2) {
+                int sw1 = response[response.length - 2] & 0xFF;
+                int sw2 = response[response.length - 1] & 0xFF;
+
+                if (sw1 == 0x90 && sw2 == 0x00) {
+                    String cardNum = findCardNumberInData(response, response.length - 2);
+                    if (cardNum != null) {
+                        Log.i(TAG, "readCardNumber: Found from READ BINARY = " + cardNum);
+                        return cardNum;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "readCardNumber: READ BINARY failed - " + e.getMessage());
+        }
+
+        Log.w(TAG, "readCardNumber: Card number not found");
         return null;
     }
 
     /**
-     * TLV에서 카드번호 추출
+     * 데이터에서 카드번호 패턴 찾기
      */
+    private String findCardNumberInData(byte[] data, int length) {
+        String cardNum = extractCardNumberFromTlv(data, length);
+        if (cardNum != null) return cardNum;
+
+        for (int i = 0; i <= length - 8; i++) {
+            if (isValidBcdCardNumber(data, i, 8)) {
+                cardNum = formatBcdCardNumber(data, i, 8);
+                if (cardNum != null && cardNum.replace(" ", "").length() == 16) {
+                    return cardNum;
+                }
+            }
+        }
+
+        if (length >= 8) {
+            cardNum = formatBcdCardNumber(data, 0, 8);
+            if (cardNum != null && isValidCardNumber(cardNum)) {
+                return cardNum;
+            }
+        }
+
+        return null;
+    }
+
+    private boolean isValidBcdCardNumber(byte[] data, int offset, int len) {
+        int digitCount = 0;
+        for (int i = 0; i < len && offset + i < data.length; i++) {
+            int high = (data[offset + i] >> 4) & 0x0F;
+            int low = data[offset + i] & 0x0F;
+
+            if (high <= 9) digitCount++;
+            else if (high != 0x0F) return false;
+
+            if (low <= 9) digitCount++;
+            else if (low != 0x0F) return false;
+        }
+        return digitCount >= 16;
+    }
+
+    private boolean isValidCardNumber(String cardNum) {
+        String digits = cardNum.replace(" ", "");
+        if (digits.length() < 16) return false;
+
+        for (char c : digits.toCharArray()) {
+            if (c < '0' || c > '9') return false;
+        }
+
+        boolean allZero = true;
+        for (char c : digits.toCharArray()) {
+            if (c != '0') {
+                allZero = false;
+                break;
+            }
+        }
+        return !allZero;
+    }
+
     private String extractCardNumberFromTlv(byte[] data, int length) {
         for (int i = 0; i < length - 2; i++) {
             int tag = data[i] & 0xFF;
 
-            // Tag 5A (Application PAN)
             if (tag == 0x5A && i + 1 < length) {
                 int len = data[i + 1] & 0xFF;
-                if (i + 2 + len <= length && len >= 8) {
-                    return formatBcdCardNumber(data, i + 2, len);
+                if (len > 0 && len <= 10 && i + 2 + len <= length) {
+                    String cardNum = formatBcdCardNumber(data, i + 2, len);
+                    if (cardNum != null && isValidCardNumber(cardNum)) {
+                        return cardNum;
+                    }
                 }
             }
 
-            // Tag 57 (Track 2 Equivalent Data)
             if (tag == 0x57 && i + 1 < length) {
                 int len = data[i + 1] & 0xFF;
-                if (i + 2 + len <= length && len >= 8) {
-                    return formatTrack2CardNumber(data, i + 2, len);
+                if (len > 0 && len <= 19 && i + 2 + len <= length) {
+                    String cardNum = formatTrack2CardNumber(data, i + 2, len);
+                    if (cardNum != null && isValidCardNumber(cardNum)) {
+                        return cardNum;
+                    }
                 }
             }
 
-            // Tag 9F6B
             if (tag == 0x9F && i + 1 < length && (data[i + 1] & 0xFF) == 0x6B && i + 2 < length) {
                 int len = data[i + 2] & 0xFF;
-                if (i + 3 + len <= length && len >= 8) {
-                    return formatTrack2CardNumber(data, i + 3, len);
+                if (len > 0 && len <= 19 && i + 3 + len <= length) {
+                    String cardNum = formatTrack2CardNumber(data, i + 3, len);
+                    if (cardNum != null && isValidCardNumber(cardNum)) {
+                        return cardNum;
+                    }
                 }
             }
         }
         return null;
     }
 
-    /**
-     * BCD 인코딩된 카드번호를 "XXXX XXXX XXXX XXXX" 형식으로 변환
-     */
     private String formatBcdCardNumber(byte[] data, int offset, int len) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < len && offset + i < data.length; i++) {
@@ -191,9 +287,6 @@ public class EZLParser implements CardParser {
         return raw.length() > 0 ? raw : null;
     }
 
-    /**
-     * Track 2 데이터에서 카드번호 추출
-     */
     private String formatTrack2CardNumber(byte[] data, int offset, int len) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < len && offset + i < data.length; i++) {
@@ -215,7 +308,6 @@ public class EZLParser implements CardParser {
 
     private int readBalance(IsoDep isoDep) {
         try {
-            // T-money style balance command (90 4C 00 00 04)
             byte[] balanceCmd = new byte[]{
                     (byte) 0x90, (byte) 0x4C, (byte) 0x00, (byte) 0x00, (byte) 0x04
             };
@@ -243,58 +335,130 @@ public class EZLParser implements CardParser {
     }
 
     /**
-     * 거래내역 읽기
+     * 거래내역 읽기 - 여러 방법 시도
      */
     private List<Transaction> readTransactionHistory(IsoDep isoDep) {
         List<Transaction> transactions = new ArrayList<>();
+        Log.d(TAG, "=== readTransactionHistory: Starting ===");
 
+        // 방법 1: 90 4E 명령
         try {
-            // 1. 거래내역 개수 조회 (90 4E 00 01 00)
-            byte[] countCmd = {(byte)0x90, 0x4E, 0x00, 0x01, 0x00};
-            byte[] countResp = isoDep.transceive(countCmd);
-            Log.d(TAG, "readTransactionHistory: count = " + bytesToHex(countResp));
+            for (int i = 1; i <= 10; i++) {
+                byte[] cmd = {(byte)0x90, 0x4E, 0x00, (byte)i, 0x00};
+                byte[] response = isoDep.transceive(cmd);
+                Log.d(TAG, "readTransactionHistory: 90 4E record " + i + " = " + bytesToHex(response));
 
-            int recordCount = 10;
-            if (countResp != null && countResp.length >= 3) {
-                int sw1 = countResp[countResp.length - 2] & 0xFF;
-                int sw2 = countResp[countResp.length - 1] & 0xFF;
-                if (sw1 == 0x90 && sw2 == 0x00) {
-                    recordCount = countResp[0] & 0xFF;
-                    Log.d(TAG, "readTransactionHistory: recordCount = " + recordCount);
-                }
-            }
+                if (response != null && response.length > 2) {
+                    int sw1 = response[response.length - 2] & 0xFF;
+                    int sw2 = response[response.length - 1] & 0xFF;
 
-            // 2. 각 거래내역 레코드 읽기 (90 4E 00 02 xx)
-            for (int i = 0; i < Math.min(recordCount, 10); i++) {
-                try {
-                    byte[] readCmd = {(byte)0x90, 0x4E, 0x00, 0x02, (byte)i};
-                    byte[] response = isoDep.transceive(readCmd);
-                    Log.d(TAG, "readTransactionHistory: record " + i + " = " + bytesToHex(response));
-
-                    if (response != null && response.length >= 16) {
-                        int sw1 = response[response.length - 2] & 0xFF;
-                        int sw2 = response[response.length - 1] & 0xFF;
-
-                        if (sw1 == 0x90 && sw2 == 0x00) {
-                            Transaction tx = parseTransactionRecord(response);
+                    if (sw1 == 0x90 && sw2 == 0x00 && response.length >= 10) {
+                        Transaction tx = parseTransactionRecord(response, response.length - 2);
+                        if (tx != null) {
+                            transactions.add(tx);
+                        }
+                    } else if (sw1 == 0x6C && sw2 > 0) {
+                        byte[] retryCmd = {(byte)0x90, 0x4E, 0x00, (byte)i, (byte)sw2};
+                        response = isoDep.transceive(retryCmd);
+                        Log.d(TAG, "readTransactionHistory: 90 4E record " + i + " retry = " + bytesToHex(response));
+                        if (response != null && response.length > 2) {
+                            Transaction tx = parseTransactionRecord(response, response.length - 2);
                             if (tx != null) {
                                 transactions.add(tx);
                             }
                         }
+                    } else {
+                        break;
                     }
-                } catch (Exception e) {
-                    Log.d(TAG, "readTransactionHistory: record " + i + " failed");
+                } else {
+                    break;
                 }
             }
-
-            // 3. 90 4E가 안되면 READ RECORD로 시도
-            if (transactions.isEmpty()) {
-                Log.d(TAG, "readTransactionHistory: Trying READ RECORD method...");
-                transactions = readTransactionHistoryByRecord(isoDep);
-            }
-
         } catch (Exception e) {
-            Log.e(TAG, "readTransactionHistory: Error", e);
+            Log.d(TAG, "readTransactionHistory: 90 4E failed - " + e.getMessage());
+        }
+
+        // 방법 2: SFI 기반 READ RECORD
+        if (transactions.isEmpty()) {
+            Log.d(TAG, "readTransactionHistory: Trying SFI method...");
+            int[] sfis = {7, 8, 9, 10, 11, 12};
+
+            for (int sfi : sfis) {
+                int p2 = (sfi << 3) | 0x04;
+                for (int record = 1; record <= 10; record++) {
+                    try {
+                        byte[] cmd = {0x00, (byte)0xB2, (byte)record, (byte)p2, 0x00};
+                        byte[] response = isoDep.transceive(cmd);
+
+                        if (response != null && response.length > 2) {
+                            int sw1 = response[response.length - 2] & 0xFF;
+                            int sw2 = response[response.length - 1] & 0xFF;
+
+                            if (sw1 == 0x90 && sw2 == 0x00 && response.length >= 10) {
+                                Log.d(TAG, "readTransactionHistory: SFI" + sfi + " Rec" + record + " = " + bytesToHex(response));
+                                Transaction tx = parseTransactionRecord(response, response.length - 2);
+                                if (tx != null) {
+                                    transactions.add(tx);
+                                }
+                            } else if (sw1 == 0x6C && sw2 > 0) {
+                                byte[] retryCmd = {0x00, (byte)0xB2, (byte)record, (byte)p2, (byte)sw2};
+                                response = isoDep.transceive(retryCmd);
+                                if (response != null && response.length > 2) {
+                                    Log.d(TAG, "readTransactionHistory: SFI" + sfi + " Rec" + record + " retry = " + bytesToHex(response));
+                                    Transaction tx = parseTransactionRecord(response, response.length - 2);
+                                    if (tx != null) {
+                                        transactions.add(tx);
+                                    }
+                                }
+                            } else if (sw1 == 0x6A) {
+                                break;
+                            }
+                        }
+                    } catch (Exception e) {
+                        break;
+                    }
+                }
+                if (!transactions.isEmpty()) {
+                    Log.i(TAG, "readTransactionHistory: Found transactions in SFI " + sfi);
+                    break;
+                }
+            }
+        }
+
+        // 방법 3: GET RECORD (90 B2)
+        if (transactions.isEmpty()) {
+            Log.d(TAG, "readTransactionHistory: Trying GET RECORD method...");
+            try {
+                for (int i = 0; i < 10; i++) {
+                    byte[] cmd = {(byte)0x90, (byte)0xB2, (byte)i, 0x00, 0x00};
+                    byte[] response = isoDep.transceive(cmd);
+
+                    if (response != null && response.length > 2) {
+                        int sw1 = response[response.length - 2] & 0xFF;
+                        int sw2 = response[response.length - 1] & 0xFF;
+
+                        if (sw1 == 0x90 && sw2 == 0x00 && response.length >= 10) {
+                            Log.d(TAG, "readTransactionHistory: 90 B2 record " + i + " = " + bytesToHex(response));
+                            Transaction tx = parseTransactionRecord(response, response.length - 2);
+                            if (tx != null) {
+                                transactions.add(tx);
+                            }
+                        } else if (sw1 == 0x6C && sw2 > 0) {
+                            byte[] retryCmd = {(byte)0x90, (byte)0xB2, (byte)i, 0x00, (byte)sw2};
+                            response = isoDep.transceive(retryCmd);
+                            if (response != null && response.length > 2) {
+                                Log.d(TAG, "readTransactionHistory: 90 B2 record " + i + " retry = " + bytesToHex(response));
+                                Transaction tx = parseTransactionRecord(response, response.length - 2);
+                                if (tx != null) {
+                                    transactions.add(tx);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                Log.d(TAG, "readTransactionHistory: 90 B2 failed - " + e.getMessage());
+            }
         }
 
         Log.i(TAG, "readTransactionHistory: Found " + transactions.size() + " transactions");
@@ -302,76 +466,37 @@ public class EZLParser implements CardParser {
     }
 
     /**
-     * READ RECORD로 거래내역 읽기 (대체 방법)
+     * 거래내역 레코드 파싱 - 여러 포맷 시도
      */
-    private List<Transaction> readTransactionHistoryByRecord(IsoDep isoDep) {
-        List<Transaction> transactions = new ArrayList<>();
-        int[] sfis = {7, 8, 9};
+    private Transaction parseTransactionRecord(byte[] data, int length) {
+        if (length < 8) return null;
 
-        for (int sfi : sfis) {
-            int p2 = (sfi << 3) | 0x04;
-            for (int record = 1; record <= 10; record++) {
-                try {
-                    byte[] cmd = {0x00, (byte)0xB2, (byte)record, (byte)p2, 0x00};
-                    byte[] response = isoDep.transceive(cmd);
-
-                    if (response != null && response.length > 2) {
-                        int sw1 = response[response.length - 2] & 0xFF;
-                        int sw2 = response[response.length - 1] & 0xFF;
-
-                        if (sw1 == 0x90 && sw2 == 0x00 && response.length >= 16) {
-                            Log.d(TAG, "readTransactionHistoryByRecord: SFI" + sfi + " Rec" + record + " = " + bytesToHex(response));
-                            Transaction tx = parseTransactionRecordFromSfi(response);
-                            if (tx != null) {
-                                transactions.add(tx);
-                            }
-                        } else if (sw1 == 0x6A && sw2 == 0x83) {
-                            break;
-                        }
-                    }
-                } catch (Exception e) {
-                    break;
-                }
+        boolean isEmpty = true;
+        for (int i = 0; i < Math.min(8, length); i++) {
+            if (data[i] != 0 && (data[i] & 0xFF) != 0xFF) {
+                isEmpty = false;
+                break;
             }
-            if (!transactions.isEmpty()) break;
         }
+        if (isEmpty) return null;
 
-        return transactions;
+        Transaction tx = tryParseFormat1(data, length);
+        if (tx != null) return tx;
+
+        tx = tryParseFormat2(data, length);
+        if (tx != null) return tx;
+
+        tx = tryParseFormat3(data, length);
+        if (tx != null) return tx;
+
+        return null;
     }
 
-    /**
-     * 거래내역 레코드 파싱
-     */
-    private Transaction parseTransactionRecord(byte[] data) {
+    private Transaction tryParseFormat1(byte[] data, int length) {
         try {
-            if (data.length < 14) return null;
+            if (length < 13) return null;
 
             int txType = data[0] & 0xFF;
-            TransactionType transactionType;
-            String typeDesc;
-            switch (txType) {
-                case 0x01:
-                    transactionType = TransactionType.USE;
-                    typeDesc = "승차";
-                    break;
-                case 0x02:
-                    transactionType = TransactionType.USE;
-                    typeDesc = "하차";
-                    break;
-                case 0x03:
-                    transactionType = TransactionType.USE;
-                    typeDesc = "환승";
-                    break;
-                case 0x04:
-                case 0x05:
-                    transactionType = TransactionType.CHARGE;
-                    typeDesc = "충전";
-                    break;
-                default:
-                    transactionType = TransactionType.USE;
-                    typeDesc = "사용";
-            }
-
             String date = parseBcdDate(data, 1);
 
             int amount = ((data[5] & 0xFF) << 24) |
@@ -384,63 +509,41 @@ public class EZLParser implements CardParser {
                               ((data[11] & 0xFF) << 8) |
                               (data[12] & 0xFF);
 
-            if (amount == 0 && balanceAfter == 0) return null;
-            if (amount > 1000000 || balanceAfter > 1000000) return null;
+            if (!isValidTransaction(amount, balanceAfter)) return null;
 
-            Log.d(TAG, "parseTransactionRecord: type=" + typeDesc + ", date=" + date +
+            TransactionType transactionType = getTransactionType(txType);
+            String typeDesc = getTransactionTypeDesc(txType);
+
+            Log.d(TAG, "parseFormat1: type=" + typeDesc + ", date=" + date +
                       ", amount=" + amount + ", balance=" + balanceAfter);
 
             return new Transaction(date, typeDesc, amount, balanceAfter, transactionType);
         } catch (Exception e) {
-            Log.e(TAG, "parseTransactionRecord: Error", e);
             return null;
         }
     }
 
-    /**
-     * SFI READ RECORD에서 거래내역 파싱
-     */
-    private Transaction parseTransactionRecordFromSfi(byte[] data) {
+    private Transaction tryParseFormat2(byte[] data, int length) {
         try {
-            if (data.length < 14) return null;
+            if (length < 13) return null;
 
-            boolean allZero = true;
-            for (int i = 0; i < Math.min(12, data.length - 2); i++) {
-                if (data[i] != 0) {
-                    allZero = false;
-                    break;
-                }
-            }
-            if (allZero) return null;
+            String date = parseBcdDate(data, 0);
+            int txType = data[4] & 0xFF;
 
-            int txType = data[0] & 0xFF;
-            TransactionType transactionType = (txType == 0x04 || txType == 0x05) ?
-                    TransactionType.CHARGE : TransactionType.USE;
-            String typeDesc = (transactionType == TransactionType.CHARGE) ? "충전" : "사용";
+            int amount = ((data[5] & 0xFF) << 24) |
+                        ((data[6] & 0xFF) << 16) |
+                        ((data[7] & 0xFF) << 8) |
+                        (data[8] & 0xFF);
 
-            String date = parseBcdDate(data, 1);
-            if (date.equals("00/00/00 00:00")) {
-                date = parseBcdDate(data, 0);
-            }
+            int balanceAfter = ((data[9] & 0xFF) << 24) |
+                              ((data[10] & 0xFF) << 16) |
+                              ((data[11] & 0xFF) << 8) |
+                              (data[12] & 0xFF);
 
-            int amount = 0;
-            int balanceAfter = 0;
+            if (!isValidTransaction(amount, balanceAfter)) return null;
 
-            if (data.length >= 12) {
-                amount = ((data[4] & 0xFF) << 24) |
-                        ((data[5] & 0xFF) << 16) |
-                        ((data[6] & 0xFF) << 8) |
-                        (data[7] & 0xFF);
-                balanceAfter = ((data[8] & 0xFF) << 24) |
-                              ((data[9] & 0xFF) << 16) |
-                              ((data[10] & 0xFF) << 8) |
-                              (data[11] & 0xFF);
-            }
-
-            if (amount > 500000) amount = 0;
-            if (balanceAfter > 500000) balanceAfter = 0;
-
-            if (amount == 0 && balanceAfter == 0) return null;
+            TransactionType transactionType = getTransactionType(txType);
+            String typeDesc = getTransactionTypeDesc(txType);
 
             return new Transaction(date, typeDesc, amount, balanceAfter, transactionType);
         } catch (Exception e) {
@@ -448,26 +551,91 @@ public class EZLParser implements CardParser {
         }
     }
 
-    /**
-     * BCD 인코딩된 날짜 파싱
-     */
+    private Transaction tryParseFormat3(byte[] data, int length) {
+        try {
+            if (length < 8) return null;
+
+            for (int offset = 0; offset <= length - 8; offset += 4) {
+                int amount = ((data[offset] & 0xFF) << 24) |
+                            ((data[offset + 1] & 0xFF) << 16) |
+                            ((data[offset + 2] & 0xFF) << 8) |
+                            (data[offset + 3] & 0xFF);
+
+                int balanceAfter = ((data[offset + 4] & 0xFF) << 24) |
+                                  ((data[offset + 5] & 0xFF) << 16) |
+                                  ((data[offset + 6] & 0xFF) << 8) |
+                                  (data[offset + 7] & 0xFF);
+
+                if (isValidTransaction(amount, balanceAfter)) {
+                    TransactionType txType = (amount > balanceAfter) ?
+                            TransactionType.USE : TransactionType.CHARGE;
+                    String typeDesc = (txType == TransactionType.CHARGE) ? "충전" : "사용";
+                    return new Transaction("", typeDesc, amount, balanceAfter, txType);
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private boolean isValidTransaction(int amount, int balance) {
+        if (amount < 0 || balance < 0) return false;
+        if (amount > 500000 || balance > 500000) return false;
+        if (amount == 0 && balance == 0) return false;
+        return true;
+    }
+
+    private TransactionType getTransactionType(int txType) {
+        switch (txType) {
+            case 0x04:
+            case 0x05:
+            case 0x10:
+            case 0x11:
+                return TransactionType.CHARGE;
+            default:
+                return TransactionType.USE;
+        }
+    }
+
+    private String getTransactionTypeDesc(int txType) {
+        switch (txType) {
+            case 0x01: return "승차";
+            case 0x02: return "하차";
+            case 0x03: return "환승";
+            case 0x04:
+            case 0x05:
+            case 0x10:
+            case 0x11:
+                return "충전";
+            case 0x20:
+            case 0x21:
+                return "결제";
+            default: return "사용";
+        }
+    }
+
     private String parseBcdDate(byte[] data, int offset) {
         try {
-            if (offset + 5 > data.length) return "00/00/00 00:00";
+            if (offset + 4 > data.length) return "";
 
-            int yy = ((data[offset] >> 4) & 0x0F) * 10 + (data[offset] & 0x0F);
-            int mm = ((data[offset + 1] >> 4) & 0x0F) * 10 + (data[offset + 1] & 0x0F);
-            int dd = ((data[offset + 2] >> 4) & 0x0F) * 10 + (data[offset + 2] & 0x0F);
-            int hh = ((data[offset + 3] >> 4) & 0x0F) * 10 + (data[offset + 3] & 0x0F);
-            int min = ((data[offset + 4] >> 4) & 0x0F) * 10 + (data[offset + 4] & 0x0F);
+            int b0 = data[offset] & 0xFF;
+            int b1 = data[offset + 1] & 0xFF;
+            int b2 = data[offset + 2] & 0xFF;
+            int b3 = data[offset + 3] & 0xFF;
 
-            if (mm < 1 || mm > 12 || dd < 1 || dd > 31 || hh > 23 || min > 59) {
-                return "00/00/00 00:00";
+            int yy = ((b0 >> 4) & 0x0F) * 10 + (b0 & 0x0F);
+            int mm = ((b1 >> 4) & 0x0F) * 10 + (b1 & 0x0F);
+            int dd = ((b2 >> 4) & 0x0F) * 10 + (b2 & 0x0F);
+            int hh = ((b3 >> 4) & 0x0F) * 10 + (b3 & 0x0F);
+
+            if (mm < 1 || mm > 12 || dd < 1 || dd > 31 || hh > 23) {
+                return "";
             }
 
-            return String.format("%02d/%02d/%02d %02d:%02d", yy, mm, dd, hh, min);
+            return String.format("%02d/%02d/%02d %02d:00", yy, mm, dd, hh);
         } catch (Exception e) {
-            return "00/00/00 00:00";
+            return "";
         }
     }
 
