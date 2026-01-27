@@ -169,6 +169,15 @@ public class HanpayParser implements CardParser {
     private String findCardNumber(byte[] data, int length) {
         if (length < 8) return null;
 
+        // FCI Template (6F) 응답인 경우: offset 8에서 카드번호 추출
+        if (length >= 16 && (data[0] & 0xFF) == 0x6F) {
+            String cardNum = formatBcdCardNumber(data, 8, 8);
+            if (isValidCardNumber(cardNum)) {
+                Log.d(TAG, "Card number found at FCI offset 8: " + cardNum);
+                return cardNum;
+            }
+        }
+
         // TLV 태그 검색 (5A, 57)
         for (int i = 0; i < length - 2; i++) {
             int tag = data[i] & 0xFF;
@@ -188,13 +197,24 @@ public class HanpayParser implements CardParser {
             }
         }
 
-        // BCD 16자리 패턴 검색
+        // BCD 16자리 패턴 검색 (모든 nibble이 0-9인 경우만)
         for (int i = 0; i <= length - 8; i++) {
-            String cardNum = formatBcdCardNumber(data, i, 8);
-            if (isValidCardNumber(cardNum)) return cardNum;
+            if (isValidBcdBlock(data, i, 8)) {
+                String cardNum = formatBcdCardNumber(data, i, 8);
+                if (isValidCardNumber(cardNum)) return cardNum;
+            }
         }
 
         return null;
+    }
+
+    private boolean isValidBcdBlock(byte[] data, int offset, int len) {
+        for (int i = 0; i < len && offset + i < data.length; i++) {
+            int high = (data[offset + i] >> 4) & 0x0F;
+            int low = data[offset + i] & 0x0F;
+            if (high > 9 || low > 9) return false;
+        }
+        return true;
     }
 
     private List<Transaction> readTransactionHistory(IsoDep isoDep) {
