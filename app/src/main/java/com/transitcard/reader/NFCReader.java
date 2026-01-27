@@ -14,6 +14,11 @@ public class NFCReader {
 
     public TransitCardData readCard(Tag tag) {
         Log.d(TAG, "=== readCard: Starting card read ===");
+
+        // Reset state for new card read (fixes consecutive card recognition)
+        kftcBalance = 0;
+        kftcCardNumber = null;
+
         try {
             byte[] id = tag.getId();
             Log.d(TAG, "readCard: Card ID = " + bytesToHex(id));
@@ -81,8 +86,8 @@ public class NFCReader {
         Log.d(TAG, "readIsoDepCard: Starting IsoDep card read");
         try {
             isoDep.connect();
-            isoDep.setTimeout(5000);
-            Log.d(TAG, "readIsoDepCard: Connected to card, timeout=5000ms");
+            isoDep.setTimeout(2000);  // Reduced timeout for faster response
+            Log.d(TAG, "readIsoDepCard: Connected to card, timeout=2000ms");
             Log.d(TAG, "readIsoDepCard: Max transceive length = " + isoDep.getMaxTransceiveLength());
 
             // Detect card type based on card ID and AID
