@@ -1,0 +1,165 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.transitcard.reader"
+4    android:versionCode="1"
+5    android:versionName="1.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="21"
+9        android:targetSdkVersion="34" />
+10
+11    <!-- NFC 권한 -->
+12    <uses-permission android:name="android.permission.NFC" />
+12-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:6:5-62
+12-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:6:22-59
+13
+14    <uses-feature
+14-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:7:5-9:35
+15        android:name="android.hardware.nfc"
+15-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:8:9-44
+16        android:required="true" />
+16-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:9:9-32
+17
+18    <permission
+18-->[androidx.core:core:1.12.0] C:\Users\chodong\.gradle\caches\transforms-3\027df7278ec3cee7f69c61e0906d51cb\transformed\core-1.12.0\AndroidManifest.xml:22:5-24:47
+19        android:name="com.transitcard.reader.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+19-->[androidx.core:core:1.12.0] C:\Users\chodong\.gradle\caches\transforms-3\027df7278ec3cee7f69c61e0906d51cb\transformed\core-1.12.0\AndroidManifest.xml:23:9-81
+20        android:protectionLevel="signature" />
+20-->[androidx.core:core:1.12.0] C:\Users\chodong\.gradle\caches\transforms-3\027df7278ec3cee7f69c61e0906d51cb\transformed\core-1.12.0\AndroidManifest.xml:24:9-44
+21
+22    <uses-permission android:name="com.transitcard.reader.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+22-->[androidx.core:core:1.12.0] C:\Users\chodong\.gradle\caches\transforms-3\027df7278ec3cee7f69c61e0906d51cb\transformed\core-1.12.0\AndroidManifest.xml:26:5-97
+22-->[androidx.core:core:1.12.0] C:\Users\chodong\.gradle\caches\transforms-3\027df7278ec3cee7f69c61e0906d51cb\transformed\core-1.12.0\AndroidManifest.xml:26:22-94
+23
+24    <application
+24-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:11:5-42:19
+25        android:allowBackup="true"
+25-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:12:9-35
+26        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+26-->[androidx.core:core:1.12.0] C:\Users\chodong\.gradle\caches\transforms-3\027df7278ec3cee7f69c61e0906d51cb\transformed\core-1.12.0\AndroidManifest.xml:28:18-86
+27        android:debuggable="true"
+28        android:extractNativeLibs="true"
+29        android:icon="@mipmap/ic_launcher"
+29-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:13:9-43
+30        android:label="@string/app_name"
+30-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:14:9-41
+31        android:roundIcon="@mipmap/ic_launcher_round"
+31-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:15:9-54
+32        android:supportsRtl="true"
+32-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:16:9-35
+33        android:testOnly="true"
+34        android:theme="@style/Theme.TransitCardReader" >
+34-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:17:9-55
+35        <activity
+35-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:20:9-41:20
+36            android:name="com.transitcard.reader.MainActivity"
+36-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:21:13-41
+37            android:exported="true"
+37-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:22:13-36
+38            android:screenOrientation="portrait" >
+38-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:23:13-49
+39            <intent-filter>
+39-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:24:13-27:29
+40                <action android:name="android.intent.action.MAIN" />
+40-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:25:17-69
+40-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:25:25-66
+41
+42                <category android:name="android.intent.category.LAUNCHER" />
+42-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:26:17-77
+42-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:26:27-74
+43            </intent-filter>
+44
+45            <!-- NFC Intent Filter -->
+46            <intent-filter>
+46-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:30:13-32:29
+47                <action android:name="android.nfc.action.TECH_DISCOVERED" />
+47-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:31:17-77
+47-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:31:25-74
+48            </intent-filter>
+49            <intent-filter>
+49-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:33:13-36:29
+50                <action android:name="android.nfc.action.TAG_DISCOVERED" />
+50-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:34:17-76
+50-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:34:25-73
+51
+52                <category android:name="android.intent.category.DEFAULT" />
+52-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:35:17-76
+52-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:35:27-73
+53            </intent-filter>
+54
+55            <meta-data
+55-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:38:13-40:59
+56                android:name="android.nfc.action.TECH_DISCOVERED"
+56-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:39:17-66
+57                android:resource="@xml/nfc_tech_filter" />
+57-->C:\Users\chodong\Desktop\server_android_source\test\test\app\src\main\AndroidManifest.xml:40:17-56
+58        </activity>
+59
+60        <provider
+60-->[androidx.emoji2:emoji2:1.2.0] C:\Users\chodong\.gradle\caches\transforms-3\b9fdcacd3a19c246ecea1c515db592da\transformed\emoji2-1.2.0\AndroidManifest.xml:24:9-32:20
+61            android:name="androidx.startup.InitializationProvider"
+61-->[androidx.emoji2:emoji2:1.2.0] C:\Users\chodong\.gradle\caches\transforms-3\b9fdcacd3a19c246ecea1c515db592da\transformed\emoji2-1.2.0\AndroidManifest.xml:25:13-67
+62            android:authorities="com.transitcard.reader.androidx-startup"
+62-->[androidx.emoji2:emoji2:1.2.0] C:\Users\chodong\.gradle\caches\transforms-3\b9fdcacd3a19c246ecea1c515db592da\transformed\emoji2-1.2.0\AndroidManifest.xml:26:13-68
+63            android:exported="false" >
+63-->[androidx.emoji2:emoji2:1.2.0] C:\Users\chodong\.gradle\caches\transforms-3\b9fdcacd3a19c246ecea1c515db592da\transformed\emoji2-1.2.0\AndroidManifest.xml:27:13-37
+64            <meta-data
+64-->[androidx.emoji2:emoji2:1.2.0] C:\Users\chodong\.gradle\caches\transforms-3\b9fdcacd3a19c246ecea1c515db592da\transformed\emoji2-1.2.0\AndroidManifest.xml:29:13-31:52
+65                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+65-->[androidx.emoji2:emoji2:1.2.0] C:\Users\chodong\.gradle\caches\transforms-3\b9fdcacd3a19c246ecea1c515db592da\transformed\emoji2-1.2.0\AndroidManifest.xml:30:17-75
+66                android:value="androidx.startup" />
+66-->[androidx.emoji2:emoji2:1.2.0] C:\Users\chodong\.gradle\caches\transforms-3\b9fdcacd3a19c246ecea1c515db592da\transformed\emoji2-1.2.0\AndroidManifest.xml:31:17-49
+67            <meta-data
+67-->[androidx.lifecycle:lifecycle-process:2.7.0] C:\Users\chodong\.gradle\caches\transforms-3\47e2337c929bc21fa1fdab6f39d1c32e\transformed\lifecycle-process-2.7.0\AndroidManifest.xml:29:13-31:52
+68                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+68-->[androidx.lifecycle:lifecycle-process:2.7.0] C:\Users\chodong\.gradle\caches\transforms-3\47e2337c929bc21fa1fdab6f39d1c32e\transformed\lifecycle-process-2.7.0\AndroidManifest.xml:30:17-78
+69                android:value="androidx.startup" />
+69-->[androidx.lifecycle:lifecycle-process:2.7.0] C:\Users\chodong\.gradle\caches\transforms-3\47e2337c929bc21fa1fdab6f39d1c32e\transformed\lifecycle-process-2.7.0\AndroidManifest.xml:31:17-49
+70            <meta-data
+70-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:29:13-31:52
+71                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+71-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:30:17-85
+72                android:value="androidx.startup" />
+72-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:31:17-49
+73        </provider>
+74
+75        <receiver
+75-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:34:9-52:20
+76            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+76-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:35:13-76
+77            android:directBootAware="false"
+77-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:36:13-44
+78            android:enabled="true"
+78-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:37:13-35
+79            android:exported="true"
+79-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:38:13-36
+80            android:permission="android.permission.DUMP" >
+80-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:39:13-57
+81            <intent-filter>
+81-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:40:13-42:29
+82                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+82-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:41:17-91
+82-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:41:25-88
+83            </intent-filter>
+84            <intent-filter>
+84-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:43:13-45:29
+85                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+85-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:44:17-85
+85-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:44:25-82
+86            </intent-filter>
+87            <intent-filter>
+87-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:46:13-48:29
+88                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+88-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:47:17-88
+88-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:47:25-85
+89            </intent-filter>
+90            <intent-filter>
+90-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:49:13-51:29
+91                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+91-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:50:17-95
+91-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\chodong\.gradle\caches\transforms-3\00fe1ac1814f3fabf0c3eb4ad39b5e3e\transformed\profileinstaller-1.3.0\AndroidManifest.xml:50:25-92
+92            </intent-filter>
+93        </receiver>
+94    </application>
+95
+96</manifest>

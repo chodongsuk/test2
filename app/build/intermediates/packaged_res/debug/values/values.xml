@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="dark_gray">#757575</color>
+    <color name="light_gray">#F5F5F5</color>
+    <color name="primary_blue">#1976D2</color>
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="white">#FFFFFFFF</color>
+    <string name="amount">금액</string>
+    <string name="app_name">교통카드 조회</string>
+    <string name="balance">잔액</string>
+    <string name="balance_after">거래 후 잔액</string>
+    <string name="card_detected">카드 감지됨</string>
+    <string name="card_list">• 티머니 (전국)\n• 캐시비 (전국)\n• 한페이 (전국)\n• 레일플러스 (철도)\n• 엠패스 (부산·경남)\n• 서울시티패스 (서울 관광)\n• 코리아 투어 카드 (외국인 관광)</string>
+    <string name="card_number">카드 번호</string>
+    <string name="card_type">카드 종류</string>
+    <string name="cashbee">캐시비 (Cashbee)</string>
+    <string name="date">날짜</string>
+    <string name="error_reading_card">카드를 읽을 수 없습니다.</string>
+    <string name="hanpay">한페이 (Hanpay)</string>
+    <string name="korea_tour_card">코리아 투어 카드 (Korea Tour Card)</string>
+    <string name="last_transaction">마지막 거래</string>
+    <string name="location">위치</string>
+    <string name="main_title">교통카드 리더</string>
+    <string name="mpass">엠패스 (M Pass)</string>
+    <string name="nfc_disabled">NFC가 비활성화되어 있습니다.\n설정에서 NFC를 활성화해주세요.</string>
+    <string name="nfc_not_supported">이 기기는 NFC를 지원하지 않습니다.</string>
+    <string name="railplus">레일플러스 (Rail+)</string>
+    <string name="reading_card">카드를 읽는 중...</string>
+    <string name="scan_button">카드 스캔</string>
+    <string name="scan_instruction">카드를 스마트폰 뒷면에 가까이 대주세요</string>
+    <string name="seoul_city_pass">서울시티패스 (Seoul City Pass)</string>
+    <string name="supported_cards">지원 카드</string>
+    <string name="tmoney">티머니 (T-money)</string>
+    <string name="transaction_history">거래 내역</string>
+    <string name="unknown_card">알 수 없는 카드</string>
+    <string name="won">원</string>
+    <style name="Theme.TransitCardReader" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
+        <item name="colorPrimary">#1976D2</item>
+        <item name="colorPrimaryVariant">#1565C0</item>
+        <item name="colorOnPrimary">@android:color/white</item>
+        <item name="colorSecondary">#00BCD4</item>
+        <item name="colorSecondaryVariant">#0097A7</item>
+        <item name="colorOnSecondary">@android:color/white</item>
+        <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
+    </style>
+</resources>

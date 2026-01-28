@@ -1,0 +1,26 @@
+[
+    {
+        "merged": "com.transitcard.reader.app-merged_res-34:/layout_activity_main.xml.flat",
+        "source": "com.transitcard.reader.app-main-36:/layout/activity_main.xml"
+    },
+    {
+        "merged": "com.transitcard.reader.app-merged_res-34:/mipmap-xxxhdpi_ic_launcher_round.png.flat",
+        "source": "com.transitcard.reader.app-main-36:/mipmap-xxxhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.transitcard.reader.app-merged_res-34:/layout_transaction_item.xml.flat",
+        "source": "com.transitcard.reader.app-main-36:/layout/transaction_item.xml"
+    },
+    {
+        "merged": "com.transitcard.reader.app-merged_res-34:/xml_nfc_tech_filter.xml.flat",
+        "source": "com.transitcard.reader.app-main-36:/xml/nfc_tech_filter.xml"
+    },
+    {
+        "merged": "com.transitcard.reader.app-merged_res-34:/mipmap-xxxhdpi_ic_launcher.png.flat",
+        "source": "com.transitcard.reader.app-main-36:/mipmap-xxxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.transitcard.reader.app-merged_res-34:/mipmap-xxxhdpi_icon.png.flat",
+        "source": "com.transitcard.reader.app-main-36:/mipmap-xxxhdpi/icon.png"
+    }
+]

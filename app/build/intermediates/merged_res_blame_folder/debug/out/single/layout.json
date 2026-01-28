@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "com.transitcard.reader.app-mergeDebugResources-33:/layout/transaction_item.xml",
+        "source": "com.transitcard.reader.app-main-36:/layout/transaction_item.xml"
+    },
+    {
+        "merged": "com.transitcard.reader.app-mergeDebugResources-33:/layout/activity_main.xml",
+        "source": "com.transitcard.reader.app-main-36:/layout/activity_main.xml"
+    }
+]
