@@ -17,6 +17,7 @@ import androidx.cardview.widget.CardView;
 import java.text.NumberFormat;
 import java.util.Locale;
 
+//test
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
 
