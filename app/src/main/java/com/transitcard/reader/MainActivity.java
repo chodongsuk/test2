@@ -138,25 +138,34 @@ public class MainActivity extends AppCompatActivity {
 
     private void readCard(Tag tag) {
         Log.d(TAG, "readCard: Starting to read card");
+        Log.d(TAG, "readCard: Tag ID = " + bytesToHex(tag.getId()));
         showStatus(getString(R.string.reading_card));
 
         // Read card in background
         new Thread(() -> {
             Log.d(TAG, "readCard: Background thread started");
-            TransitCardData cardData = nfcReader.readCard(tag);
-            Log.d(TAG, "readCard: Card data received, cardData=" + (cardData != null ? cardData.toString() : "null"));
+            TransitCardData cardData = null;
+
+            try {
+                cardData = nfcReader.readCard(tag);
+                Log.d(TAG, "readCard: Card data received, cardData=" + (cardData != null ? cardData.toString() : "null"));
+            } catch (Exception e) {
+                Log.e(TAG, "readCard: Exception during card read", e);
+                e.printStackTrace();
+            }
 
             // Update UI on main thread
+            final TransitCardData finalCardData = cardData;
             runOnUiThread(() -> {
                 hideStatus();
-                if (cardData != null) {
-                    Log.i(TAG, "readCard: Successfully read card - Type: " + cardData.getCardType() +
-                            ", Number: " + cardData.getCardNumber() +
-                            ", Balance: " + cardData.getBalance());
-                    displayCardData(cardData);
+                if (finalCardData != null) {
+                    Log.i(TAG, "readCard: Successfully read card - Type: " + finalCardData.getCardType() +
+                            ", Number: " + finalCardData.getCardNumber() +
+                            ", Balance: " + finalCardData.getBalance());
+                    displayCardData(finalCardData);
                 } else {
-                    Log.w(TAG, "readCard: Failed to read card data");
-                    Toast.makeText(this, R.string.error_reading_card, Toast.LENGTH_SHORT).show();
+                    Log.w(TAG, "readCard: Failed to read card data - card data is null");
+                    Toast.makeText(this, "카드를 읽을 수 없습니다. 티머니 또는 캐시비 카드인지 확인해주세요.", Toast.LENGTH_LONG).show();
                 }
             });
         }).start();
@@ -191,6 +200,7 @@ public class MainActivity extends AppCompatActivity {
         } else {
             transactionHistoryCard.setVisibility(View.GONE);
         }
+
     }
 
     private void displayTransactionHistory(java.util.List<Transaction> transactions) {
@@ -221,14 +231,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String formatCardNumber(String cardNumber) {
-        // Format card number with spaces for better readability
-        if (cardNumber.length() > 8) {
+        // Remove existing spaces first
+        String digitsOnly = cardNumber.replace(" ", "");
+
+        // Format with spaces: XXXX XXXX XXXX XXXX
+        if (digitsOnly.length() >= 16) {
+            return digitsOnly.substring(0, 4) + " " +
+                    digitsOnly.substring(4, 8) + " " +
+                    digitsOnly.substring(8, 12) + " " +
+                    digitsOnly.substring(12, 16);
+        } else if (digitsOnly.length() > 8) {
+            // For shorter card numbers, format every 4 digits
             StringBuilder formatted = new StringBuilder();
-            for (int i = 0; i < cardNumber.length(); i++) {
+            for (int i = 0; i < digitsOnly.length(); i++) {
                 if (i > 0 && i % 4 == 0) {
                     formatted.append(" ");
                 }
-                formatted.append(cardNumber.charAt(i));
+                formatted.append(digitsOnly.charAt(i));
             }
             return formatted.toString();
         }
@@ -242,5 +261,14 @@ public class MainActivity extends AppCompatActivity {
 
     private void hideStatus() {
         statusTextView.setVisibility(View.GONE);
+    }
+
+    private String bytesToHex(byte[] bytes) {
+        if (bytes == null) return "null";
+        StringBuilder result = new StringBuilder();
+        for (byte b : bytes) {
+            result.append(String.format("%02X", b));
+        }
+        return result.toString();
     }
 }
