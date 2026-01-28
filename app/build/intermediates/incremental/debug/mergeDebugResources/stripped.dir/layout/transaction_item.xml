@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:background="?attr/selectableItemBackground">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/transactionDate"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="2024-01-01"
+            android:textSize="14sp"
+            android:textColor="@color/dark_gray" />
+
+        <TextView
+            android:id="@+id/transactionAmount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="-1,500 원"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="@color/black" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/transactionLocation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="서울역"
+        android:textSize="14sp"
+        android:textColor="@color/black"
+        android:layout_marginTop="4dp" />
+
+    <TextView
+        android:id="@+id/transactionBalanceAfter"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="거래 후 잔액: 10,000 원"
+        android:textSize="12sp"
+        android:textColor="@color/dark_gray"
+        android:layout_marginTop="4dp" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/light_gray"
+        android:layout_marginTop="12dp" />
+
+</LinearLayout>
