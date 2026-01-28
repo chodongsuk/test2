@@ -1,5 +1,6 @@
 package com.transitcard.reader;
 
+import android.app.AlertDialog;
 import android.app.PendingIntent;
 import android.content.Intent;
 import android.nfc.NfcAdapter;
@@ -7,86 +8,120 @@ import android.nfc.Tag;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
-import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.cardview.widget.CardView;
+import androidx.viewpager2.widget.ViewPager2;
 
-import java.text.NumberFormat;
-import java.util.Locale;
+import com.google.android.material.tabs.TabLayout;
+import com.google.android.material.tabs.TabLayoutMediator;
+import com.transitcard.reader.CardPagerAdapter;
+import com.transitcard.reader.AppDatabase;
+import com.transitcard.reader.CardDao;
+import com.transitcard.reader.CardEntity;
+import com.transitcard.reader.CardWithTransactions;
 
-//test
+import java.util.List;
+
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
 
+    // NFC 관련
     private NfcAdapter nfcAdapter;
     private NFCReader nfcReader;
     private PendingIntent pendingIntent;
 
-    // UI Components
+    // Database 관련
+    private AppDatabase database;
+    private CardDao cardDao;
+
+    // UI 관련
     private TextView statusTextView;
     private TextView scanInstructionTextView;
-    private CardView cardInfoCard;
-    private CardView transactionHistoryCard;
-    private TextView cardTypeValue;
-    private TextView cardNumberValue;
-    private TextView balanceValue;
-    private LinearLayout transactionHistoryContainer;
+    private TextView emptyStateTextView;
+    private ViewPager2 cardViewPager;
+    private TabLayout tabLayout;
+    private CardPagerAdapter cardAdapter;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        Log.d(TAG, "onCreate: Starting MainActivity");
+        Log.d(TAG, "onCreate: MainActivity 시작");
         setContentView(R.layout.activity_main);
 
-        // Initialize NFC
-        nfcAdapter = NfcAdapter.getDefaultAdapter(this);
-        nfcReader = new NFCReader();
-        Log.d(TAG, "onCreate: NFC adapter initialized, isEnabled=" + (nfcAdapter != null ? nfcAdapter.isEnabled() : "null"));
-
-        // Initialize UI components
-        initializeViews();
-
-        // Check NFC availability
+        // Database 초기화
+        initDatabase();
+        initNFC();
+        initViews();
+        setupViewPager();
         checkNfcAvailability();
-
-        // Create pending intent for NFC
-        Intent intent = new Intent(this, getClass());
-        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        pendingIntent = PendingIntent.getActivity(
-                this,
-                0,
-                intent,
-                PendingIntent.FLAG_MUTABLE
-        );
-
-        // Check if launched by NFC intent
+        createPendingIntent();
+        observeCards();
         handleIntent(getIntent());
     }
 
-    private void initializeViews() {
+    private void initDatabase() {
+        database = AppDatabase.getInstance(this);
+        cardDao = database.cardDao();
+        Log.d(TAG, "Database 초기화 완료");
+    }
+
+    private void initNFC() {
+        nfcAdapter = NfcAdapter.getDefaultAdapter(this);
+        nfcReader = new NFCReader();
+    }
+
+    private void initViews() {
         statusTextView = findViewById(R.id.statusTextView);
         scanInstructionTextView = findViewById(R.id.scanInstructionTextView);
-        cardInfoCard = findViewById(R.id.cardInfoCard);
-        transactionHistoryCard = findViewById(R.id.transactionHistoryCard);
-        cardTypeValue = findViewById(R.id.cardTypeValue);
-        cardNumberValue = findViewById(R.id.cardNumberValue);
-        balanceValue = findViewById(R.id.balanceValue);
-        transactionHistoryContainer = findViewById(R.id.transactionHistoryContainer);
+        emptyStateTextView = findViewById(R.id.emptyStateTextView);
+        cardViewPager = findViewById(R.id.cardViewPager);
+        tabLayout = findViewById(R.id.tabLayout);
     }
+
+    private void setupViewPager() {
+        cardAdapter = new CardPagerAdapter();
+        cardViewPager.setAdapter(cardAdapter);
+        cardAdapter.setOnCardDeleteListener(this::showDeleteConfirmDialog);
+
+        new TabLayoutMediator(tabLayout, cardViewPager,
+                (tab, position) -> tab.setText("카드 " + (position + 1))
+        ).attach();
+    }
+
+    private void createPendingIntent() {
+        Intent intent = new Intent(this, getClass());
+        intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_MUTABLE);
+    }
+
+    private void observeCards() {
+        cardDao.getAllCardsWithTransactions().observe(this, cards -> {
+            Log.d(TAG, "카드 목록 변경: " + (cards != null ? cards.size() : 0) + "개");
+
+            if (cards != null && !cards.isEmpty()) {
+                cardAdapter.setCards(cards);
+                cardViewPager.setVisibility(View.VISIBLE);
+                tabLayout.setVisibility(View.VISIBLE);
+                emptyStateTextView.setVisibility(View.GONE);
+            } else {
+                cardViewPager.setVisibility(View.GONE);
+                tabLayout.setVisibility(View.GONE);
+                emptyStateTextView.setVisibility(View.VISIBLE);
+            }
+        });
+    }
+
+    // ==================== NFC 관련 ====================
 
     private void checkNfcAvailability() {
         if (nfcAdapter == null) {
-            // NFC not supported
-            showStatus(getString(R.string.nfc_not_supported));
+            showStatus("NFC를 지원하지 않는 기기입니다");
             scanInstructionTextView.setVisibility(View.GONE);
         } else if (!nfcAdapter.isEnabled()) {
-            // NFC is disabled
-            showStatus(getString(R.string.nfc_disabled));
+            showStatus("NFC를 켜주세요");
         } else {
-            // NFC is enabled and ready
             hideStatus();
         }
     }
@@ -97,8 +132,6 @@ public class MainActivity extends AppCompatActivity {
         if (nfcAdapter != null && nfcAdapter.isEnabled()) {
             nfcAdapter.enableForegroundDispatch(this, pendingIntent, null, null);
             hideStatus();
-        } else {
-            checkNfcAvailability();
         }
     }
 
@@ -118,142 +151,149 @@ public class MainActivity extends AppCompatActivity {
 
     private void handleIntent(Intent intent) {
         String action = intent.getAction();
-        Log.d(TAG, "handleIntent: action=" + action);
-
         if (NfcAdapter.ACTION_TAG_DISCOVERED.equals(action) ||
                 NfcAdapter.ACTION_TECH_DISCOVERED.equals(action) ||
                 NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)) {
 
             Tag tag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
-            Log.d(TAG, "handleIntent: Tag received, tag=" + (tag != null ? tag.toString() : "null"));
             if (tag != null) {
-                String[] techList = tag.getTechList();
-                Log.d(TAG, "handleIntent: Tag tech list:");
-                for (String tech : techList) {
-                    Log.d(TAG, "  - " + tech);
-                }
                 readCard(tag);
             }
         }
     }
 
     private void readCard(Tag tag) {
-        Log.d(TAG, "readCard: Starting to read card");
-        Log.d(TAG, "readCard: Tag ID = " + bytesToHex(tag.getId()));
-        showStatus(getString(R.string.reading_card));
+        Log.d(TAG, "카드 읽기 시작");
+        showStatus("카드를 읽고 있습니다...");
 
-        // Read card in background
         new Thread(() -> {
-            Log.d(TAG, "readCard: Background thread started");
             TransitCardData cardData = null;
-
             try {
                 cardData = nfcReader.readCard(tag);
-                Log.d(TAG, "readCard: Card data received, cardData=" + (cardData != null ? cardData.toString() : "null"));
             } catch (Exception e) {
-                Log.e(TAG, "readCard: Exception during card read", e);
-                e.printStackTrace();
+                Log.e(TAG, "카드 읽기 오류", e);
             }
 
-            // Update UI on main thread
             final TransitCardData finalCardData = cardData;
             runOnUiThread(() -> {
                 hideStatus();
                 if (finalCardData != null) {
-                    Log.i(TAG, "readCard: Successfully read card - Type: " + finalCardData.getCardType() +
-                            ", Number: " + finalCardData.getCardNumber() +
-                            ", Balance: " + finalCardData.getBalance());
-                    displayCardData(finalCardData);
+                    saveOrUpdateCard(finalCardData);
+                    Toast.makeText(this, "카드 인식 완료!", Toast.LENGTH_SHORT).show();
                 } else {
-                    Log.w(TAG, "readCard: Failed to read card data - card data is null");
-                    Toast.makeText(this, "카드를 읽을 수 없습니다. 티머니 또는 캐시비 카드인지 확인해주세요.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "카드를 읽을 수 없습니다", Toast.LENGTH_LONG).show();
                 }
             });
         }).start();
     }
 
-    private void displayCardData(TransitCardData cardData) {
-        Log.d(TAG, "displayCardData: Displaying card data");
-        Log.d(TAG, "displayCardData: Card Type = " + cardData.getCardType().getDisplayName());
-        Log.d(TAG, "displayCardData: Card Number = " + cardData.getCardNumber());
-        Log.d(TAG, "displayCardData: Balance = " + cardData.getBalance());
-        Log.d(TAG, "displayCardData: Transaction count = " +
-                (cardData.getTransactionHistory() != null ? cardData.getTransactionHistory().size() : 0));
+    // ==================== Database 관련 ====================
 
-        // Show card detected message
-        Toast.makeText(this, R.string.card_detected, Toast.LENGTH_SHORT).show();
+    private void saveOrUpdateCard(TransitCardData cardData) {
+        new Thread(() -> {
+            try {
+                CardEntity existingCard = cardDao.getCardByNumber(cardData.getCardNumber());
 
-        // Display card info
-        cardTypeValue.setText(cardData.getCardType().getDisplayName());
-        cardNumberValue.setText(formatCardNumber(cardData.getCardNumber()));
-
-        // Display balance
-        NumberFormat numberFormat = NumberFormat.getNumberInstance(Locale.KOREA);
-        balanceValue.setText(numberFormat.format(cardData.getBalance()));
-
-        // Show card info card
-        cardInfoCard.setVisibility(View.VISIBLE);
-
-        // Display transaction history if available
-        if (cardData.getTransactionHistory() != null && !cardData.getTransactionHistory().isEmpty()) {
-            displayTransactionHistory(cardData.getTransactionHistory());
-            transactionHistoryCard.setVisibility(View.VISIBLE);
-        } else {
-            transactionHistoryCard.setVisibility(View.GONE);
-        }
-
-    }
-
-    private void displayTransactionHistory(java.util.List<Transaction> transactions) {
-        transactionHistoryContainer.removeAllViews();
-
-        NumberFormat numberFormat = NumberFormat.getNumberInstance(Locale.KOREA);
-
-        for (Transaction transaction : transactions) {
-            View transactionView = getLayoutInflater().inflate(
-                    R.layout.transaction_item,
-                    transactionHistoryContainer,
-                    false
-            );
-
-            TextView dateTextView = transactionView.findViewById(R.id.transactionDate);
-            TextView locationTextView = transactionView.findViewById(R.id.transactionLocation);
-            TextView amountTextView = transactionView.findViewById(R.id.transactionAmount);
-            TextView balanceAfterTextView = transactionView.findViewById(R.id.transactionBalanceAfter);
-
-            dateTextView.setText(transaction.getDate());
-            locationTextView.setText(transaction.getLocation());
-            amountTextView.setText(numberFormat.format(transaction.getAmount()) + " " + getString(R.string.won));
-            balanceAfterTextView.setText(getString(R.string.balance_after) + ": " +
-                    numberFormat.format(transaction.getBalanceAfter()) + " " + getString(R.string.won));
-
-            transactionHistoryContainer.addView(transactionView);
-        }
-    }
-
-    private String formatCardNumber(String cardNumber) {
-        // Remove existing spaces first
-        String digitsOnly = cardNumber.replace(" ", "");
-
-        // Format with spaces: XXXX XXXX XXXX XXXX
-        if (digitsOnly.length() >= 16) {
-            return digitsOnly.substring(0, 4) + " " +
-                    digitsOnly.substring(4, 8) + " " +
-                    digitsOnly.substring(8, 12) + " " +
-                    digitsOnly.substring(12, 16);
-        } else if (digitsOnly.length() > 8) {
-            // For shorter card numbers, format every 4 digits
-            StringBuilder formatted = new StringBuilder();
-            for (int i = 0; i < digitsOnly.length(); i++) {
-                if (i > 0 && i % 4 == 0) {
-                    formatted.append(" ");
+                if (existingCard != null) {
+                    // 기존 카드 업데이트
+                    updateCard(existingCard, cardData);
+                } else {
+                    // 새 카드 추가
+                    insertCard(cardData);
                 }
-                formatted.append(digitsOnly.charAt(i));
+            } catch (Exception e) {
+                Log.e(TAG, "카드 저장 오류", e);
+                runOnUiThread(() ->
+                        Toast.makeText(this, "저장 실패", Toast.LENGTH_SHORT).show()
+                );
             }
-            return formatted.toString();
-        }
-        return cardNumber;
+        }).start();
     }
+
+    private void updateCard(CardEntity existingCard, TransitCardData cardData) {
+        Log.d(TAG, "카드 업데이트: " + existingCard.getCardNumber());
+
+        // 1. 카드 정보 업데이트
+        existingCard.setBalance(cardData.getBalance());
+        existingCard.setLastUpdated(System.currentTimeMillis());
+        cardDao.updateCard(existingCard);
+
+        // 2. 거래내역 완전 교체 (핵심!)
+        Log.d(TAG, "기존 거래내역 삭제");
+        cardDao.deleteTransactionsByCardId(existingCard.getId());
+
+        Log.d(TAG, "새 거래내역 추가");
+        saveTransactions(existingCard.getId(), cardData.getTransactionHistory());
+
+        runOnUiThread(() ->
+                Toast.makeText(this, "카드 정보 업데이트 완료", Toast.LENGTH_SHORT).show()
+        );
+    }
+
+    private void insertCard(TransitCardData cardData) {
+        Log.d(TAG, "새 카드 추가: " + cardData.getCardNumber());
+
+        // 1. 카드 추가
+        CardEntity newCard = new CardEntity(
+                cardData.getCardNumber(),
+                cardData.getCardType().getDisplayName(),
+                cardData.getBalance()
+        );
+        long cardId = cardDao.insertCard(newCard);
+
+        // 2. 거래내역 추가
+        saveTransactions((int) cardId, cardData.getTransactionHistory());
+
+        runOnUiThread(() -> {
+            Toast.makeText(this, "새 카드 등록 완료", Toast.LENGTH_SHORT).show();
+            cardViewPager.setCurrentItem(0, true);
+        });
+    }
+
+    private void saveTransactions(int cardId, List<Transaction> transactions) {
+        if (transactions == null || transactions.isEmpty()) {
+            Log.d(TAG, "거래내역 없음");
+            return;
+        }
+
+        // 각 거래에 cardId 설정
+        for (Transaction transaction : transactions) {
+            transaction.setCardId(cardId);
+        }
+
+        // 전부 삽입
+        cardDao.insertTransactions(transactions);
+        Log.d(TAG, "거래내역 저장 완료: " + transactions.size() + "개");
+    }
+
+    // ==================== 카드 삭제 ====================
+
+    private void showDeleteConfirmDialog(CardWithTransactions card) {
+        new AlertDialog.Builder(this)
+                .setTitle("카드 삭제")
+                .setMessage("이 카드를 삭제하시겠습니까?")
+                .setPositiveButton("삭제", (dialog, which) -> deleteCard(card))
+                .setNegativeButton("취소", null)
+                .show();
+    }
+
+    private void deleteCard(CardWithTransactions card) {
+        new Thread(() -> {
+            try {
+                cardDao.deleteCard(card.card);
+                // CASCADE로 거래내역도 자동 삭제됨!
+                Log.d(TAG, "카드 삭제 완료");
+
+                runOnUiThread(() ->
+                        Toast.makeText(this, "카드 삭제 완료", Toast.LENGTH_SHORT).show()
+                );
+            } catch (Exception e) {
+                Log.e(TAG, "카드 삭제 오류", e);
+            }
+        }).start();
+    }
+
+    // ==================== UI 헬퍼 ====================
 
     private void showStatus(String message) {
         statusTextView.setText(message);
@@ -262,14 +302,5 @@ public class MainActivity extends AppCompatActivity {
 
     private void hideStatus() {
         statusTextView.setVisibility(View.GONE);
-    }
-
-    private String bytesToHex(byte[] bytes) {
-        if (bytes == null) return "null";
-        StringBuilder result = new StringBuilder();
-        for (byte b : bytes) {
-            result.append(String.format("%02X", b));
-        }
-        return result.toString();
     }
 }
